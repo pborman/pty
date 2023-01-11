@@ -1,0 +1,422 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path"
+	"sort"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/pborman/pty/log"
+	"github.com/kr/pty"
+)
+
+var LoginShell string
+
+func init() {
+	for _, shell := range []string{
+		"/usr/bin/ksh",
+		"/bin/ksh",
+		"/bin/sh",
+	} {
+		if _, err := os.Stat(shell); err == nil {
+			LoginShell = shell
+			return
+		}
+	}
+	exitf("no available shells")
+}
+
+type messageKind int
+
+const (
+	dataMessage = messageKind(iota)
+	ttysizeMessage
+	ttynameMessage
+	serverMessage
+	startMessage
+	waitMessage
+	listMessage
+	countMessage
+	askCountMessage
+	exclusiveMessage
+	saveMessage
+	escapeMessage
+	preemptMessage // sent when another client takes control
+	primaryMessage // sent when we become primary
+	forwardMessage // NAME\0socket
+	psMessage
+	pingMessage
+	ackMessage
+)
+
+var messageNames = map[messageKind]string{
+	dataMessage:      "dataMessage",
+	ttysizeMessage:   "ttysizeMessage",
+	ttynameMessage:   "ttynameMessage",
+	serverMessage:    "serverMessage",
+	startMessage:     "startMessage",
+	waitMessage:      "waitMessage",
+	listMessage:      "listMessage",
+	countMessage:     "countMessage",
+	askCountMessage:  "askCountMessage",
+	exclusiveMessage: "exclusiveMessage",
+	saveMessage:      "saveMessage",
+	escapeMessage:    "escapeMessage",
+	preemptMessage:   "preemptMessage",
+	primaryMessage:   "primaryMessage",
+	forwardMessage:   "forwardMessage",
+	psMessage:        "psMessage",
+	pingMessage:      "pingMessage",
+	ackMessage:       "ackMessage",
+}
+
+func (m messageKind) String() string {
+	if s, ok := messageNames[m]; ok {
+		return s
+	}
+	return fmt.Sprintf("message-%d", m)
+}
+
+// These escape sequences are used to switch screen buffers.
+//
+// For more details: http://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+const (
+	scasb   = "\033[?1049h" // save cursor, switch to alternate screen buffer
+	nsbrc   = "\033[?1049l" // switch to normal screen buffer, restore cursor
+	cls     = nsbrc + "\033[J\033[3J\033[J"
+	edb0    = "\033[J"  // Erase below
+	edb1    = "\033[0J" // Erase below
+	eda     = "\033[1J" // Erase above
+	edall   = "\033[2J" // Erase all
+	edsaved = "\033[3J" // Erase Saved Lines
+	home    = "\033[H"
+)
+
+// A ShellClient can be attached to a Shell.
+type ShellClient interface {
+	// Output is called with each new block of bytes to be sent to the
+	// client.  When a client is attached to a shell, Output with the
+	// current buffer.  The buffer passed to output should be treated as
+	// immutable.  Output returns true if successful or false if the client
+	// has failed and should be removed from the list of clients.
+	//
+	// Output must not block.
+	Output([]byte) bool
+
+	// Send sends a message to the client.
+	Send(int, []byte) bool
+
+	// SendLoced sends a message to the client, which is already locked.
+	SendLocked(int, []byte) bool
+
+	// Close is called when no further output will be sent to the client.
+	// Close should block until the client has flushed all data that was
+	// sent via Output.
+	Close()
+}
+
+// A Shell represents an actual running shell.  There may be zero or more
+// clients attached to the shell.  The Shell parameter is the name of the shell
+// to start when Start is called.  Args are the arguments to pass to the shell.
+// If not empty, Args must start with arg0.
+type Shell struct {
+	Shell      string
+	Args       []string
+	Env        []string
+	cmd        *exec.Cmd
+	pty        *os.File
+	socket     string
+	started    chan struct{}
+	done       chan struct{}
+	wg         sync.WaitGroup
+	mu         sync.Mutex
+	clients    map[*Client]struct{}
+	eb         *EscapeBuffer
+	scr        *Screen
+	exiting    bool
+	rows, cols int
+}
+
+// NewShell returns a newly initialized, but not started, Shell.  By default,
+// Shell.Shell is set to LoginShell and Args is set to the basename of the
+// LoginShell with a "-" prepended (to indicate it is a login shell).
+func NewShell(socket string) *Shell {
+	s := &Shell{
+		started: make(chan struct{}),
+		done:    make(chan struct{}),
+		clients: map[*Client]struct{}{},
+		Shell:   LoginShell,
+		Args:    []string{"-" + path.Base(LoginShell)},
+		Env:     os.Environ(),
+		eb:      NewEscapeBuffer(0),
+		socket:  socket,
+	}
+	s.eb.AddSequence(scasb, func(eb *EscapeBuffer) bool {
+		eb.inalt = true
+		return false
+	})
+	s.eb.AddSequence(nsbrc, func(eb *EscapeBuffer) bool {
+		eb.inalt = false
+		return false
+	})
+	s.eb.AddSequence(edsaved, func(eb *EscapeBuffer) bool {
+		if !eb.inalt {
+			eb.normal = eb.normal[:0]
+			eb.normal = append(eb.normal, []byte(nsbrc)...)
+			eb.normal = append(eb.normal, []byte(edall)...)
+		}
+		return false
+	})
+	s.eb.AddSequence(edall, func(eb *EscapeBuffer) bool {
+		if eb.inalt {
+			eb.alt = eb.alt[:0]
+			eb.alt = append(eb.alt, []byte(home)...)
+			eb.alt = append(eb.alt, []byte(edall)...)
+		}
+		return false
+	})
+	return s
+}
+
+// Setenv replaces or adds the specified key value pair to the shell's
+// environment.  Setenv has no effect once Start is called.
+func (s *Shell) Setenv(key, value string) {
+	value = key + "=" + value
+	key = value[:len(key)+1]
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, v := range s.Env {
+		if strings.HasPrefix(v, key) {
+			s.Env[i] = value
+			return
+		}
+	}
+	s.Env = append(s.Env, value)
+}
+
+func (s *Shell) Attach(c *Client) int {
+	log.Infof("attach new client")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c.Send(startMessage, nil)
+	buf := append([]byte(cls), s.eb.normal...)
+	if !c.Output(buf) {
+		log.Infof("new client write failure")
+		return len(s.clients)
+	}
+	if s.eb.inalt {
+		c.Output([]byte(scasb))
+		buf := append([]byte{}, s.eb.alt...)
+		if !c.Output(buf) {
+			log.Infof("new client write failure")
+			return len(s.clients)
+		}
+	}
+	// Don't take ownership here, wait
+	// until the first input from the client
+	// arrived.
+	s.wg.Add(1)
+	s.clients[c] = struct{}{}
+	return len(s.clients) - 1
+}
+
+func (s *Shell) Take(c *Client, requestSize bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.primary {
+		return
+	}
+	s.mu.Lock()
+	log.Infof("client %s takes the session", c.Name())
+	defer s.mu.Unlock()
+	for oc := range s.clients {
+		if oc == c {
+			continue
+		}
+		oc.mu.Lock()
+		if oc.primary {
+			oc.primary = false
+			oc.SendLocked(preemptMessage, nil)
+		}
+		oc.mu.Unlock()
+	}
+	c.primary = true
+	c.SendLocked(primaryMessage, nil) // The client should reforward things
+}
+
+func (s *Shell) Detach(c *Client) {
+	log.Infof("detach client %s", c.Name())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.clients, c)
+	s.wg.Done()
+}
+
+func (s *Shell) Write(buf []byte) (int, error) {
+	n, err := s.pty.Write(buf)
+	if err != nil {
+		log.DepthErrorf(1, "pty write: %v", err)
+	}
+	return n, err
+}
+
+func (s *Shell) Wait() {
+	<-s.done
+	return
+}
+
+func (s *Shell) Done() bool {
+	select {
+	case <-s.done:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Shell) runout() {
+	var buf [8192]byte
+	r, err := s.pty.Read(buf[:])
+	close(s.started)
+	for {
+		if func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if r > 0 {
+				s.eb.Write(buf[:r])
+				nbuf := append([]byte{}, buf[:r]...)
+				for c := range s.clients {
+					if !c.Output(nbuf) {
+						log.Infof("write to client %s failed", c.Name())
+						delete(s.clients, c)
+						s.wg.Done()
+					}
+				}
+			}
+			if err != nil {
+				log.Infof("deleting all clients")
+				for c := range s.clients {
+					c := c
+					delete(s.clients, c)
+					go func() {
+						c.Close()
+						s.wg.Done()
+					}()
+				}
+				s.mu.Unlock()
+				s.wg.Wait()
+				s.mu.Lock()
+				close(s.done)
+				return true
+			}
+			return false
+		}() {
+			return
+		}
+		r, err = s.pty.Read(buf[:])
+		if err != nil {
+			log.Errorf("pty read: %v", err)
+		}
+	}
+}
+
+func (s *Shell) Start(debug bool) error {
+	s.Setenv("_PTY_SHELL", "true")
+	if s.pty != nil {
+		return errors.New("shell already started")
+	}
+	for _, name := range config.Forward {
+		value := os.Getenv(name)
+		if value == "" {
+			continue
+		}
+		sock := s.socket + "-" + name + fwdSuffix
+		s.Setenv(name, sock)
+		if err := NewForwarder(name, sock); err != nil {
+			exitf("forwarder[%s]: %s\n", name, err)
+		}
+	}
+	if s.cmd == nil {
+		s.cmd = exec.Command(s.Shell)
+		s.cmd.Args = s.Args
+		s.cmd.Env = s.Env
+	}
+
+	fd, tty, err := pty.Open()
+	if err != nil {
+		return err
+	}
+
+	defer tty.Close()
+	s.cmd.Stdout = tty
+	s.cmd.Stdin = tty
+	s.cmd.Stderr = tty
+
+	s.cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setsid:  true,
+		Setctty: true,
+		Ctty:    int(tty.Fd()),
+	}
+	err = s.cmd.Start()
+	if err != nil {
+		fd.Close()
+		return err
+	}
+	s.pty = fd
+
+	// Give the shell a chance to change the tty settings
+	time.Sleep(time.Second / 10)
+	go s.runout()
+	<-s.started
+	go func() {
+		err = s.cmd.Wait()
+		s.Exit()
+	}()
+	return nil
+}
+
+func (s *Shell) Exit() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.exiting {
+		return
+	}
+	s.exiting = true
+	for c := range s.clients {
+		if s.eb.inalt {
+			c.Output([]byte(nsbrc))
+		}
+		c.Close()
+	}
+}
+
+func (s *Shell) List(me *Client) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lines := make([]string, 0, len(s.clients))
+	for c := range s.clients {
+		name := c.Name()
+		if c == me {
+			name += " *"
+		}
+		lines = append(lines, name)
+	}
+	sort.Strings(lines)
+	var buf bytes.Buffer
+	for _, line := range lines {
+		fmt.Fprintf(&buf, "%s\r\n", line)
+	}
+	me.Send(serverMessage, buf.Bytes())
+}
+
+func (s *Shell) Setsize(rows, cols int) error {
+	s.scr.Winch(rows, cols)
+	return setsize(s.pty, rows, cols)
+}

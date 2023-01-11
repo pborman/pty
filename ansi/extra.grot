@@ -1,0 +1,248 @@
+package ansi
+
+// Extra Sequences.
+// These sequences do not include parameters or string termination sequences.
+const (
+	IND = Name("\033D") // Index
+
+	GD1CS    = Name("\033(") // Designate G1 Character Set (ISO 2022, VT100)
+	GD0CS    = Name("\033)") // Designate G0 Character Set (ISO 2022, VT100)
+	GD2CS    = Name("\033*") // Designate G2 Character Set (ISO 2022, VT100)
+	GD3CS    = Name("\033+") // Designate G3 Character Set (ISO 2022, VT100)
+	GD1CS300 = Name("\033-") // Designate G1 Character Set (VT300)
+	GD2CS300 = Name("\033.") // Designate G2 Character Set (VT300)
+	GD3CS300 = Name("\033/") // Designate G2 Character Set (VT300)
+
+	DECSTR      = Name("\033[!p")  // Soft terminal reset
+	DECSCL      = Name("\033[\"p") // Soft terminal reset
+	DECRQM      = Name("\033[$p")  // Request mode
+	DECLL       = Name("\033[q")   // Load LEDs
+	DECSCUSR    = Name("\033[ q")  // Set cursor style
+	DECSCA      = Name("\033[\"q") // Select character protection attribute
+	DECSTBM     = Name("\033[r")   // Set Scrolling Region
+	DECCARA     = Name("\033[$r")  // Change Attributes in Rectangular Area
+	SCOSC       = Name("\033[s")   // Save cursor (no parameters)
+	DECSLRM     = Name("\033[s")   // Set left and right margins
+	WINMAN      = Name("\033[t")   // Window manipulation
+	DECSWBV     = Name("\033[ t")  // Set warning-bell volume
+	DECRARA     = Name("\033[$t")  // Reverse Attributes in Rectangular Area
+	SCORC       = Name("\033[u")   // Restore cursor
+	DECSMBV     = Name("\033[ u")  // Set margin-bell volume
+	DECCRA      = Name("\033[$v")  // Copy Rectangular Area
+	DECEFR      = Name("\033['w")  // Enable Filter Rectangle
+	DECREQTPARM = Name("\033[x")   // Request Terminal Parameters
+	DECSACE     = Name("\033[*x")  // Select Attribute Change Extent
+	DECFRA      = Name("\033[$x")  // Fill Rectangular Area
+	DECRQCRA    = Name("\033[*y")  // Request Checksum of Rectangular Area
+	DECELR      = Name("\033['z")  // Enable Locator Reporting
+	DECERA      = Name("\033[$z")  // Erase Rectangular Area
+	DECSLE      = Name("\033['{")  // Select Locator Events
+	DECSERA     = Name("\033[${")  // Selective Erase Rectangular Area
+	DECRQLP     = Name("\033['|")  // Request Locator Position
+	DECIC       = Name("\033['}")  // Insert Ps Column(s)
+	DECDC       = Name("\033['~")  // Delete Ps Column(s)
+)
+
+var IND_ = Sequence{
+	Name: "IND",
+	Desc: "Index",
+	Type: ESC,
+	Code: []byte{'D'},
+}
+
+// Table maps escape sequence Names to the corresponding Sequence.
+// The sequence does not include parameters or string termination sequences.
+var ExtraTable = map[Name]*Sequence{
+	NUL:    &NUL_,
+	SOH:    &SOH_,
+	STX:    &STX_,
+	ETX:    &ETX_,
+	EOT:    &EOT_,
+	ENQ:    &ENQ_,
+	ACK:    &ACK_,
+	BEL:    &BEL_,
+	BS:     &BS_,
+	HT:     &HT_,
+	LF:     &LF_,
+	VT:     &VT_,
+	FF:     &FF_,
+	CR:     &CR_,
+	SO:     &SO_,
+	SI:     &SI_,
+	DLE:    &DLE_,
+	DC1:    &DC1_,
+	DC2:    &DC2_,
+	DC3:    &DC3_,
+	DC4:    &DC4_,
+	NAK:    &NAK_,
+	SYN:    &SYN_,
+	ETB:    &ETB_,
+	CAN:    &CAN_,
+	EM:     &EM_,
+	SUB:    &SUB_,
+	ESC:    &ESC_,
+	IS4:    &IS4_,
+	IS3:    &IS3_,
+	IS2:    &IS2_,
+	IS1:    &IS1_,
+	APC:    &APC_,
+	"\237": &APC_,
+	BPH:    &BPH_,
+	"\202": &BPH_,
+	CBT:    &CBT_,
+	CCH:    &CCH_,
+	"\224": &CCH_,
+	CHA:    &CHA_,
+	CHT:    &CHT_,
+	CMD:    &CMD_,
+	CNL:    &CNL_,
+	CPL:    &CPL_,
+	CPR:    &CPR_,
+	CSI:    &CSI_,
+	"\233": &CSI_,
+	CTC:    &CTC_,
+	CUB:    &CUB_,
+	CUD:    &CUD_,
+	CUF:    &CUF_,
+	CUP:    &CUP_,
+	CUU:    &CUU_,
+	CVT:    &CVT_,
+	DA:     &DA_,
+	DAQ:    &DAQ_,
+	DCH:    &DCH_,
+	DCS:    &DCS_,
+	"\220": &DCS_,
+	DL:     &DL_,
+	DMI:    &DMI_,
+	DSR:    &DSR_,
+	DTA:    &DTA_,
+	EA:     &EA_,
+	ECH:    &ECH_,
+	ED:     &ED_,
+	EF:     &EF_,
+	EL:     &EL_,
+	EMI:    &EMI_,
+	EPA:    &EPA_,
+	"\227": &EPA_,
+	ESA:    &ESA_,
+	"\207": &ESA_,
+	FNK:    &FNK_,
+	FNT:    &FNT_,
+	GCC:    &GCC_,
+	GSM:    &GSM_,
+	GSS:    &GSS_,
+	HPA:    &HPA_,
+	HPB:    &HPB_,
+	HPR:    &HPR_,
+	HTJ:    &HTJ_,
+	"\211": &HTJ_,
+	HTS:    &HTS_,
+	"\210": &HTS_,
+	HVP:    &HVP_,
+	ICH:    &ICH_,
+	IDCS:   &IDCS_,
+	IGS:    &IGS_,
+	IL:     &IL_,
+	INT:    &INT_,
+	JFY:    &JFY_,
+	LS1R:   &LS1R_,
+	LS2:    &LS2_,
+	LS2R:   &LS2R_,
+	LS3:    &LS3_,
+	LS3R:   &LS3R_,
+	MC:     &MC_,
+	MW:     &MW_,
+	"\225": &MW_,
+	NBH:    &NBH_,
+	"\203": &NBH_,
+	NEL:    &NEL_,
+	"\205": &NEL_,
+	NP:     &NP_,
+	OSC:    &OSC_,
+	"\235": &OSC_,
+	PEC:    &PEC_,
+	PFS:    &PFS_,
+	PLD:    &PLD_,
+	"\213": &PLD_,
+	PLU:    &PLU_,
+	"\214": &PLU_,
+	PM:     &PM_,
+	"\236": &PM_,
+	PP:     &PP_,
+	PPA:    &PPA_,
+	PPB:    &PPB_,
+	PPR:    &PPR_,
+	PTX:    &PTX_,
+	PU1:    &PU1_,
+	"\221": &PU1_,
+	PU2:    &PU2_,
+	"\222": &PU2_,
+	QUAD:   &QUAD_,
+	REP:    &REP_,
+	RI:     &RI_,
+	"\215": &RI_,
+	RIS:    &RIS_,
+	RM:     &RM_,
+	SACS:   &SACS_,
+	SAPV:   &SAPV_,
+	SCI:    &SCI_,
+	"\232": &SCI_,
+	SCO:    &SCO_,
+	SCP:    &SCP_,
+	SCS:    &SCS_,
+	SD:     &SD_,
+	SDS:    &SDS_,
+	SEE:    &SEE_,
+	SEF:    &SEF_,
+	SGR:    &SGR_,
+	SHS:    &SHS_,
+	SIMD:   &SIMD_,
+	SL:     &SL_,
+	SLH:    &SLH_,
+	SLL:    &SLL_,
+	SLS:    &SLS_,
+	SM:     &SM_,
+	SOS:    &SOS_,
+	"\230": &SOS_,
+	SPA:    &SPA_,
+	"\226": &SPA_,
+	SPD:    &SPD_,
+	SPH:    &SPH_,
+	SPI:    &SPI_,
+	SPL:    &SPL_,
+	SPQR:   &SPQR_,
+	SR:     &SR_,
+	SRCS:   &SRCS_,
+	SRS:    &SRS_,
+	SSA:    &SSA_,
+	"\206": &SSA_,
+	SSU:    &SSU_,
+	SSW:    &SSW_,
+	SS2:    &SS2_,
+	"\216": &SS2_,
+	SS3:    &SS3_,
+	"\217": &SS3_,
+	ST:     &ST_,
+	"\234": &ST_,
+	STAB:   &STAB_,
+	STS:    &STS_,
+	"\223": &STS_,
+	SU:     &SU_,
+	SVS:    &SVS_,
+	TAC:    &TAC_,
+	TALE:   &TALE_,
+	TATE:   &TATE_,
+	TBC:    &TBC_,
+	TCC:    &TCC_,
+	TSR:    &TSR_,
+	TSS:    &TSS_,
+	VPA:    &VPA_,
+	VPB:    &VPB_,
+	VPR:    &VPR_,
+	VTS:    &VTS_,
+	"\212": &VTS_,
+	C0:     &C0_,
+	C1:     &C1_,
+	C1ALT1: &C1ALT1_,
+	C1ALT2: &C1ALT2_,
+}

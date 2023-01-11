@@ -1,0 +1,5 @@
+#!/bin/sh
+echo start
+echo -n "[3J[2J[H"
+go build &&
+go test
