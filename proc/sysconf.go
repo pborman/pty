@@ -5,7 +5,7 @@ import "C"
 
 // Sysconf is the POSIX Sysconf function.
 func Sysconf(name SCName) int64 {
-	return int64(C.sysconf(_Ctype_int(name)))
+	return int64(C.sysconf(C.int(name)))
 }
 
 // An SCName represents a name for the POSIX Sysconf function call.
