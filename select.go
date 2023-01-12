@@ -39,6 +39,13 @@ func init() {
 	}
 }
 
+func splur(s int) string {
+	if s == 1 {
+		return ""
+	}
+	return "s"
+}
+
 // Select session returns the path to the selected session.  If the returned
 // bool is true then this session must be created.  An error is returned if
 // there was an error reading the name of the session.
@@ -56,8 +63,9 @@ func SelectSession() (name string, _ bool, err error) {
 		return name, name != "", err
 	}
 	fmt.Printf("Current sessions:\n")
+	fmt.Printf("    0) Create a new session\n")
 	for i, si := range sessions {
-		fmt.Printf("    %d) %s (%d)\n", i+1, si.Name, si.Count)
+		fmt.Printf("    %d) %s (%d Client%s)\n", i+1, si.Name, si.Count, splur(si.Count))
 		if si.PS != "" {
 			for _, line := range strings.Split(si.PS, "\n") {
 				if line == "" {
@@ -82,6 +90,11 @@ Loop:
 			return "", false, nil
 		}
 		if n, err := strconv.Atoi(name); err == nil {
+			if n == 0 {
+				fmt.Printf("Name of session to create: ")
+				name, err = readline()
+				return name, name != "", err
+			}
 			if n >= 1 && n <= len(sessions) {
 				return sessions[n-1].Name, false, nil
 			}
