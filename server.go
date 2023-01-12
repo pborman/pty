@@ -219,6 +219,9 @@ func runServer(session, debugFile string) {
 		args = append(args, "--internal_debug", debugFile)
 	}
 	cmd := exec.Command(os.Args[0], args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+                Setsid:  true,
+	}
 	if err := cmd.Start(); err != nil {
 		log.Errorf("rexec failed: %v", err)
 		exitf("rexec failed: %v\n", err)
