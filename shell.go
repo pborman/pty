@@ -358,11 +358,9 @@ func (s *Shell) Start(debug bool) error {
 	s.cmd.Stdout = tty
 	s.cmd.Stdin = tty
 	s.cmd.Stderr = tty
-	s.cmd.ExtraFiles = append(s.cmd.ExtraFiles, tty)
 	s.cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid:  true,
 		Setctty: true,
-		Ctty:    len(s.cmd.ExtraFiles) - 1 + 3,
 	}
 	err = s.cmd.Start()
 	if err != nil {
