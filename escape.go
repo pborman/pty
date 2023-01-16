@@ -234,8 +234,11 @@ func (e *EscapeBuffer) sendEscapes(w io.Writer, alt bool) {
 	r := ansi.NewReader(bytes.NewBuffer(buf))
 	ch := make(chan ansi.S)
 	go func() {
+checkStdin()
 		r.Send(ch)
+checkStdin()
 		close(ch)
+checkStdin()
 	}()
 	seen := map[string]bool{}
 	for s := range ch {

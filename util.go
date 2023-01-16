@@ -37,6 +37,11 @@ func exit(code int) {
 	if ostate != nil {
 		terminal.Restore(0, ostate)
 	}
+	log.Errorf("exit(%d)", code)
+	// This is our thread
+	log.DumpStack()
+	// This is all the goroutines
+	log.DumpGoroutines()
 	os.Exit(code)
 }
 
@@ -51,7 +56,7 @@ func warnf(format string, v ...interface{}) {
 	printf(format, v...)
 }
 
-func printf (format string, v ...interface{}){
+func printf(format string, v ...interface{}) {
 	msg := fmt.Sprintf(format, v...)
 	if len(msg) > 0 && msg[len(msg)-1] != '\n' {
 		fmt.Fprintln(os.Stderr, msg)
@@ -68,7 +73,6 @@ func printf (format string, v ...interface{}){
 // and results in a single charcter (e.g., "\a" or "\176").  0, false is
 // returned if echar does not unquote to a single character or is otherwise
 // invalid.
-//
 func parseEscapeChar(echar string) (byte, bool) {
 	switch len(echar) {
 	case 0:

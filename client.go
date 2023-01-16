@@ -6,7 +6,9 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"sync"
+
+	"github.com/pborman/pty/log"
+	"github.com/pborman/pty/mutex"
 )
 
 type mBuffer struct {
@@ -16,7 +18,7 @@ type mBuffer struct {
 
 // A Client represents an incoming client for a shell.
 type Client struct {
-	mu      sync.Mutex
+	mu      *mutex.Mutex
 	name    string
 	buffers []mBuffer
 	ready   chan struct{}
@@ -28,7 +30,9 @@ type Client struct {
 
 // NewClient returns a freshly initialized client that writes output to out.
 func NewClient(out io.Writer) *Client {
+	log.Infof("Added new client")
 	c := &Client{
+		mu:    mutex.New("New Client"),
 		out:   out,
 		ready: make(chan struct{}, 1),
 		done:  make(chan struct{}),
@@ -48,9 +52,9 @@ func (c *Client) Send(kind messageKind, buf []byte) bool {
 	if kind == 0 && len(buf) == 0 {
 		return true
 	}
-	c.mu.Lock()
+	unlock := c.mu.Lock("Send")
 	c.buffers = append(c.buffers, mBuffer{kind: kind, data: buf})
-	c.mu.Unlock()
+	unlock()
 	select {
 	case c.ready <- struct{}{}:
 	default:
@@ -83,14 +87,50 @@ func (c *Client) Close() {
 	close(c.ready)
 	c.ready = nil
 	<-c.done
-	if ioc, ok := c.out.(io.Closer); ok {
-		ioc.Close()
+	checkClose(c.out)
+}
+
+func getFD(fd interface{}) (string, int) {
+	type filer interface {
+		File() (*os.File, error)
 	}
+	type fder interface {
+		Fd() uintptr
+	}
+	type namer interface {
+		Name() string
+	}
+	name := "?"
+	if n, ok := fd.(namer); ok {
+		name = n.Name()
+	}
+	ffd := fd
+	if f, ok := fd.(filer); ok {
+		f1, err := f.File()
+		if err != nil {
+			log.Errorf("closing %v", err)
+			log.DumpStack()
+			return name, -1
+		}
+		ffd = f1
+	}
+	if f, ok := ffd.(fder); ok {
+		return name, int(f.Fd())
+	}
+	return name, -1
+}
+func checkClose(fd interface{}) error {
+	name, fno := getFD(fd)
+	if ioc, ok := fd.(io.Closer); ok {
+		log.Infof("Closing %d %s %T", fno, name, fd)
+		log.DumpStack()
+		return ioc.Close()
+	}
+	return nil
 }
 
 func (c *Client) nextBuf() mBuffer {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.mu.Lock("nextBuf")()
 	if len(c.buffers) == 0 {
 		return mBuffer{}
 	}
@@ -104,36 +144,64 @@ func (c *Client) Name() string {
 }
 
 func (c *Client) SetName(name string) {
-	c.mu.Lock()
+	defer c.mu.Lock("SetName")()
 	c.name = name
-	c.mu.Unlock()
 }
 
 // runout writes queued output from Output to the client's io.Writer.
 func (c *Client) runout() {
+checkStdin()
+	defer func() {
+checkStdin()
+		log.Errorf("returning from runout")
+checkStdin()
+		if p := recover(); p != nil {
+			log.Errorf("Panic: %v", p)
+			log.DumpGoroutines()
+			panic(p)
+		}
+	}()
 	defer close(c.done)
+checkStdin()
 	ready := c.ready
+checkStdin()
 	for {
+checkStdin()
 		select {
 		case _, ok := <-ready:
+checkStdin()
 			if !ok {
 				return
 			}
 		case <-c.quit:
+checkStdin()
 			return
 		}
+checkStdin()
 		for {
+checkStdin()
 			m := c.nextBuf()
+checkStdin()
 			if m.kind == 0 && m.data == nil {
+checkStdin()
 				break
 			}
+checkStdin()
 			if m.kind == 0 {
-				c.out.Write(m.data)
+checkStdin()
+				if _, err := c.out.Write(m.data); err != nil {
+checkStdin()
+log.Infof("%v", err)
+				}
+checkStdin()
 			} else if w, ok := c.out.(*MessengerWriter); ok {
+checkStdin()
 				w.Send(m.kind, m.data)
+checkStdin()
 			}
 		}
 	}
+checkStdin()
 }
 
 func displayMotd() {
@@ -142,7 +210,9 @@ func displayMotd() {
 	if err != nil {
 		return
 	}
-	os.Stdout.Write(data)
+	if _, err := os.Stdout.Write(data); err != nil {
+log.Infof("%v", err)
+	}
 	fmt.Printf("Press ENTER to continue: ")
 	var buf [1]byte
 	for {

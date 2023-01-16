@@ -21,6 +21,7 @@ func shell(socket string, debug bool) {
 	}
 	go func() {
 		s.Wait()
+		log.Errorf("Shell exiting")
 		os.Exit(0)
 	}()
 
@@ -35,9 +36,18 @@ func shell(socket string, debug bool) {
 	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, syscall.SIGABRT, syscall.SIGBUS, syscall.SIGQUIT, syscall.SIGSEGV)
 	go func() {
+		defer func() {
+			log.Errorf("Existing from signal watcher")
+			if p := recover(); p != nil {
+				log.Errorf("Panic: %v", p)
+				log.DumpGoroutines()
+				panic(p)
+			}
+
+		}()
 		for s := range ch {
 			log.Errorf("signal %v", s)
-			log.LogStack()
+			log.DumpGoroutines()
 			switch s {
 			case syscall.SIGABRT, syscall.SIGBUS, syscall.SIGSEGV:
 				exitf("exiting on signal %d", s)
@@ -53,7 +63,7 @@ func shell(socket string, debug bool) {
 		log.Infof("accepted new connection")
 		go func() {
 			attach(c, s)
-			c.Close()
+			checkClose(c)
 		}()
 	}
 }
@@ -67,6 +77,15 @@ func attach(c net.Conn, s *Shell) {
 
 	ech := make(chan error, 1)
 	go func() {
+		defer func(){
+			log.Errorf("exiting from attach")
+			if p := recover(); p != nil {
+				log.Errorf("Panic: %v", p)
+				log.DumpGoroutines()
+				panic(p)
+			}
+
+		}()
 		r := NewMessengerReader(c, func(kind messageKind, msg []byte) {
 			log.Infof("received message %q", kind)
 			switch kind {
@@ -86,18 +105,18 @@ func attach(c net.Conn, s *Shell) {
 				}
 				SetForwarder(name, socket)
 			case exclusiveMessage:
-				s.mu.Lock()
+				unlock := s.mu.Lock("exclusiveMessage")
 				var clients []*Client
 				for c := range s.clients {
 					if c != client {
 						clients = append(clients, c)
 					}
 				}
-				s.mu.Unlock()
+				unlock()
 				for _, oc := range clients {
 					s.Detach(oc)
 					oc.Output([]byte(fmt.Sprintf("\r\nDetached by client %s\r\n", client.Name())))
-					oc.Close()
+					checkClose(oc)
 				}
 			case askCountMessage:
 				mw.Sendf(countMessage, "%d:%d", cnt, os.Getpid())
@@ -105,6 +124,8 @@ func attach(c net.Conn, s *Shell) {
 				mw.Send(ackMessage, msg)
 			case ttynameMessage:
 				client.SetName(string(msg))
+			case dumpMessage:
+				log.DumpGoroutines()
 			case listMessage:
 				s.List(client)
 			case ttysizeMessage:
@@ -114,8 +135,7 @@ func attach(c net.Conn, s *Shell) {
 					return
 				}
 				rows, cols := decodeSize(msg)
-				s.mu.Lock()
-				defer s.mu.Unlock()
+				defer s.mu.Lock("ttysizeMessage")()
 				if rows == s.rows && cols == s.cols {
 					return
 				}
@@ -126,22 +146,22 @@ func attach(c net.Conn, s *Shell) {
 				}
 			case saveMessage:
 				var err error
-				s.mu.Lock()
+				unlock := s.mu.Lock("saveMessage")
 				if s.eb.inalt {
 					err = ioutil.WriteFile(string(msg), s.eb.alt, 0600)
 				} else {
 					err = ioutil.WriteFile(string(msg), s.eb.normal, 0600)
 				}
-				s.mu.Unlock()
+				unlock()
 				if err != nil {
 					mw.Sendf(serverMessage, "ERROR: saving screen: %v\n", err)
 				} else {
 					mw.Sendf(serverMessage, "screen saved to %s\r\n", msg)
 				}
 			case escapeMessage:
-				s.mu.Lock()
+				unlock := s.mu.Lock("escapeMessage")
 				s.eb.sendEscapes(mw, strings.ToLower(string(msg)) == "alt")
-				s.mu.Unlock()
+				unlock()
 			default:
 				mw.Sendf(serverMessage, "ERROR: UNSUPPORTED KIND %d\r\n", kind)
 			}
@@ -173,10 +193,10 @@ func attach(c net.Conn, s *Shell) {
 			fmt.Fprintf(os.Stderr, "%v\n", err)
 		}
 	}
-	c.Close()
+	checkClose(c)
 }
 
-// spawnServer spans a server process.
+// spawnServer spawns a server process.
 func spawnServer(session, debugFile string, foreground bool) {
 	if foreground {
 		runServer(session, debugFile)

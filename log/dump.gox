@@ -1,0 +1,270 @@
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+)
+
+func main() {
+	fmt.Println(string(clean(data)))
+}
+
+var home = append([]byte{'\t'}, []byte(os.Getenv("HOME"))...)
+
+var prune = [][]byte{
+	([]byte)("runtime/"),
+	([]byte)("/usr/lib/google-golang/src"),
+	([]byte)("internal/"),
+}
+
+func nextLine(buf []byte) (line, rest []byte) {
+	if buf == nil {
+		panic(io.EOF)
+	}
+	if x := bytes.IndexByte(buf, '\n'); x >= 0 {
+		return buf[:x+1], buf[x+1:]
+	}
+	return buf, nil
+}
+
+func clean(buf []byte) []byte {
+	defer func() {
+		if p := recover(); p != nil {
+			if p != io.EOF {
+				panic(p)
+			}
+		}
+	}()
+	var b bytes.Buffer
+	var line, path, newbuf []byte
+	var goroutine []byte
+	for len(buf) > 0 {
+		line, buf = nextLine(buf)
+		if bytes.HasPrefix(line, ([]byte)("goroutine ")) {
+			if len(newbuf) > 0 {
+				b.Write([]byte{'\n'})
+				b.Write(goroutine)
+				b.Write(newbuf)
+			}
+			newbuf = nil
+			goroutine = line
+			continue
+		}
+		if len(line) == 0 || line[0] == '\n' {
+			continue
+		}
+		path, buf = nextLine(buf)
+		if bytes.HasPrefix(path, home) {
+			newbuf = append(newbuf, line...)
+			newbuf = append(newbuf, path...)
+		}
+	}
+	if len(newbuf) > 0 {
+		b.Write([]byte{'\n'})
+		b.Write(goroutine)
+		b.Write(newbuf)
+	}
+	return b.Bytes()
+}
+
+var data = ([]byte)(`
+goroutine 37 [running]:
+runtime/pprof.writeGoroutineStacks({0x5cdb18, 0xc0006441d8})
+	/usr/lib/google-golang/src/runtime/pprof/pprof.go:703 +0x70
+runtime/pprof.writeGoroutine({0x5cdb18?, 0xc0006441d8?}, 0xc0008b8fc0?)
+	/usr/lib/google-golang/src/runtime/pprof/pprof.go:692 +0x2b
+runtime/pprof.(*Profile).WriteTo(0xc0006441d8?, {0x5cdb18?, 0xc0006441d8?}, 0x1?)
+	/usr/lib/google-golang/src/runtime/pprof/pprof.go:329 +0x14b
+github.com/bormanp/pty/log.(*Logger).LogStack(0xc0001cc230)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/log/log.go:230 +0xfc
+github.com/bormanp/pty/log.LogStack(...)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/log/log.go:237
+main.shell.func2()
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:50 +0xf2
+created by main.shell
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:38 +0x25b
+
+goroutine 1 [IO wait, 7 minutes]:
+internal/poll.runtime_pollWait(0x7f5264c10618, 0x72)
+	/usr/lib/google-golang/src/runtime/netpoll.go:306 +0x89
+internal/poll.(*pollDesc).wait(0xc000490000?, 0x69d020?, 0x0)
+	/usr/lib/google-golang/src/internal/poll/fd_poll_runtime.go:84 +0x32
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/lib/google-golang/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Accept(0xc000490000)
+	/usr/lib/google-golang/src/internal/poll/fd_unix.go:614 +0x2bd
+net.(*netFD).accept(0xc000490000)
+	/usr/lib/google-golang/src/net/fd_unix.go:172 +0x35
+net.(*UnixListener).accept(0x444040?)
+	/usr/lib/google-golang/src/net/unixsock_posix.go:172 +0x1c
+net.(*UnixListener).Accept(0xc0004a8030)
+	/usr/lib/google-golang/src/net/unixsock.go:260 +0x3d
+main.shell({0x7ffef1d186cc, 0x32}, 0x0?)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:59 +0x26f
+main.runServer({0x7ffef1d186cc?, 0x596846?}, {0x0?, 0x7ffef1d186f6?})
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:231 +0x7c
+main.main()
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/main.go:82 +0x125a
+
+goroutine 19 [chan receive, 7 minutes]:
+github.com/bormanp/pty/log.NewLogger.func1()
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/log/log.go:68 +0xa5
+created by github.com/bormanp/pty/log.NewLogger
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/log/log.go:67 +0x19e
+
+goroutine 34 [syscall, 365 minutes]:
+syscall.Syscall6(0x0?, 0x0?, 0x0?, 0x0?, 0x0?, 0x0?, 0x0?)
+	/usr/lib/google-golang/src/syscall/syscall_linux.go:91 +0x36
+os.(*Process).blockUntilWaitable(0xc0001bc240)
+	/usr/lib/google-golang/src/os/wait_waitid.go:32 +0x87
+os.(*Process).wait(0xc0001bc240)
+	/usr/lib/google-golang/src/os/exec_unix.go:22 +0x28
+os.(*Process).Wait(...)
+	/usr/lib/google-golang/src/os/exec.go:132
+os/exec.(*Cmd).Wait(0xc00040e000)
+	/usr/lib/google-golang/src/os/exec/exec.go:890 +0x45
+main.(*Shell).Start.func1()
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/shell.go:384 +0x2f
+created by main.(*Shell).Start
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/shell.go:383 +0x5fe
+
+goroutine 21 [syscall, 7 minutes]:
+syscall.Syscall(0xc000118f20?, 0x552608?, 0x4b1992?, 0x7ffff800000?)
+	/usr/lib/google-golang/src/syscall/syscall_linux.go:69 +0x27
+syscall.read(0xc0001ac2a0?, {0xc000410000?, 0x40fc01?, 0x7f5264c061e8?})
+	/usr/lib/google-golang/src/syscall/zsyscall_linux_amd64.go:711 +0x45
+syscall.Read(...)
+	/usr/lib/google-golang/src/syscall/syscall_unix.go:178
+internal/poll.ignoringEINTRIO(...)
+	/usr/lib/google-golang/src/internal/poll/fd_unix.go:794
+internal/poll.(*FD).Read(0xc0001ac2a0?, {0xc000410000?, 0x2000?, 0x2000?})
+	/usr/lib/google-golang/src/internal/poll/fd_unix.go:163 +0x2ce
+os.(*File).read(...)
+	/usr/lib/google-golang/src/os/file_posix.go:31
+os.(*File).Read(0xc0001aa080, {0xc000410000?, 0xc000410000?, 0xc000118f90?})
+	/usr/lib/google-golang/src/os/file.go:118 +0x5e
+main.(*Shell).runout(0xc0001fe000)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/shell.go:330 +0xeb
+created by main.(*Shell).Start
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/shell.go:381 +0x58b
+
+goroutine 35 [chan receive, 365 minutes]:
+main.(*Shell).Wait(...)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/shell.go:268
+main.shell.func1()
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:23 +0x25
+created by main.shell
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:22 +0xca
+
+goroutine 5 [syscall]:
+os/signal.signal_recv()
+	/usr/lib/google-golang/src/runtime/sigqueue.go:152 +0x2f
+os/signal.loop()
+	/usr/lib/google-golang/src/os/signal/signal_unix.go:23 +0x19
+created by os/signal.Notify.func1.1
+	/usr/lib/google-golang/src/os/signal/signal.go:151 +0x2a
+
+goroutine 1264 [select, 8 minutes]:
+main.attach({0x5ced90?, 0xc0001aa060}, 0xc0001fe000)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:187 +0x23c
+main.shell.func3()
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:65 +0x2f
+created by main.shell
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:64 +0x265
+
+goroutine 25 [select, 235 minutes]:
+main.(*Client).runout(0xc0001ac480)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:126 +0xd1
+created by main.NewClient
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:40 +0x1c5
+
+goroutine 1265 [select, 7 minutes]:
+main.(*Client).runout(0xc000496360)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:126 +0xd1
+created by main.NewClient
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:40 +0x1c5
+
+goroutine 1287 [IO wait, 28 minutes]:
+internal/poll.runtime_pollWait(0x7f5264c10528, 0x72)
+	/usr/lib/google-golang/src/runtime/netpoll.go:306 +0x89
+internal/poll.(*pollDesc).wait(0xc000500300?, 0xc00045c000?, 0x0)
+	/usr/lib/google-golang/src/internal/poll/fd_poll_runtime.go:84 +0x32
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/lib/google-golang/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc000500300, {0xc00045c000, 0x8000, 0x8000})
+	/usr/lib/google-golang/src/internal/poll/fd_unix.go:167 +0x299
+net.(*netFD).Read(0xc000500300, {0xc00045c000?, 0xc00043bd60?, 0x4582f1?})
+	/usr/lib/google-golang/src/net/fd_posix.go:55 +0x29
+net.(*conn).Read(0xc000014070, {0xc00045c000?, 0xc00043bd60?, 0xc00043bdc0?})
+	/usr/lib/google-golang/src/net/net.go:183 +0x45
+main.(*MessengerReader).fill(0xc00071c780, 0x1)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/messenger.go:240 +0x22b
+main.(*MessengerReader).Read(0xc00071c780, {0xc00043bf50, 0x8000, 0x8000})
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/messenger.go:144 +0x226
+main.attach.func2()
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:170 +0x19c
+created by main.attach
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:79 +0x1d5
+
+goroutine 1283 [select, 7 minutes]:
+main.(*Client).runout(0xc00071c540)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:126 +0xd1
+created by main.NewClient
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:40 +0x1c5
+
+goroutine 1315 [select, 10 minutes]:
+main.(*Client).runout(0xc00060e0c0)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:126 +0xd1
+created by main.NewClient
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:40 +0x1c5
+
+goroutine 1282 [select, 28 minutes]:
+main.attach({0x5ced90?, 0xc000014070}, 0xc0001fe000)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:187 +0x23c
+main.shell.func3()
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:65 +0x2f
+created by main.shell
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:64 +0x265
+
+goroutine 1323 [select, 8 minutes]:
+main.(*Client).runout(0xc00060e8a0)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:126 +0xd1
+created by main.NewClient
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:40 +0x1c5
+
+goroutine 1160 [select, 28 minutes]:
+main.(*Client).runout(0xc00071c0c0)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:126 +0xd1
+created by main.NewClient
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:40 +0x1c5
+
+goroutine 1349 [IO wait, 7 minutes]:
+internal/poll.runtime_pollWait(0x7f5264c10438, 0x72)
+	/usr/lib/google-golang/src/runtime/netpoll.go:306 +0x89
+internal/poll.(*pollDesc).wait(0xc000500280?, 0xc0001f0000?, 0x0)
+	/usr/lib/google-golang/src/internal/poll/fd_poll_runtime.go:84 +0x32
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/lib/google-golang/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc000500280, {0xc0001f0000, 0x8000, 0x8000})
+	/usr/lib/google-golang/src/internal/poll/fd_unix.go:167 +0x299
+net.(*netFD).Read(0xc000500280, {0xc0001f0000?, 0xc00052dd60?, 0x4582f1?})
+	/usr/lib/google-golang/src/net/fd_posix.go:55 +0x29
+net.(*conn).Read(0xc0001aa060, {0xc0001f0000?, 0xc00052dd60?, 0xc00052ddc0?})
+	/usr/lib/google-golang/src/net/net.go:183 +0x45
+main.(*MessengerReader).fill(0xc00063a0c0, 0x1)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/messenger.go:240 +0x22b
+main.(*MessengerReader).Read(0xc00063a0c0, {0xc00052df50, 0x8000, 0x8000})
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/messenger.go:144 +0x226
+main.attach.func2()
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:170 +0x19c
+created by main.attach
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/server.go:79 +0x1d5
+
+goroutine 3134 [select, 7 minutes]:
+main.(*Client).runout(0xc00063b680)
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:126 +0xd1
+created by main.NewClient
+	/usr/local/google/home/borman/src/github.com/bormanp/pty/client.go:40 +0x1c5
+`)

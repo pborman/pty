@@ -13,8 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pborman/pty/log"
+	"github.com/pborman/pty/mutex"
 	"github.com/kr/pty"
+	"github.com/pborman/pty/log"
 )
 
 var LoginShell string
@@ -54,6 +55,7 @@ const (
 	psMessage
 	pingMessage
 	ackMessage
+	dumpMessage // Cause the server to dump
 )
 
 var messageNames = map[messageKind]string{
@@ -75,6 +77,7 @@ var messageNames = map[messageKind]string{
 	psMessage:        "psMessage",
 	pingMessage:      "pingMessage",
 	ackMessage:       "ackMessage",
+	dumpMessage:       "dumpMessage",
 }
 
 func (m messageKind) String() string {
@@ -136,7 +139,7 @@ type Shell struct {
 	started    chan struct{}
 	done       chan struct{}
 	wg         sync.WaitGroup
-	mu         sync.Mutex
+	mu         *mutex.Mutex
 	clients    map[*Client]struct{}
 	eb         *EscapeBuffer
 	scr        *Screen
@@ -149,6 +152,7 @@ type Shell struct {
 // LoginShell with a "-" prepended (to indicate it is a login shell).
 func NewShell(socket string) *Shell {
 	s := &Shell{
+		mu:      mutex.New("Shell " + socket),
 		started: make(chan struct{}),
 		done:    make(chan struct{}),
 		clients: map[*Client]struct{}{},
@@ -190,8 +194,7 @@ func NewShell(socket string) *Shell {
 func (s *Shell) Setenv(key, value string) {
 	value = key + "=" + value
 	key = value[:len(key)+1]
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.mu.Lock("Setenv")()
 	for i, v := range s.Env {
 		if strings.HasPrefix(v, key) {
 			s.Env[i] = value
@@ -203,8 +206,7 @@ func (s *Shell) Setenv(key, value string) {
 
 func (s *Shell) Attach(c *Client) int {
 	log.Infof("attach new client")
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.mu.Lock("Attach")()
 	c.Send(startMessage, nil)
 	buf := append([]byte(cls), s.eb.normal...)
 	if !c.Output(buf) {
@@ -228,24 +230,22 @@ func (s *Shell) Attach(c *Client) int {
 }
 
 func (s *Shell) Take(c *Client, requestSize bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer c.mu.Lock("Take1")()
 	if c.primary {
 		return
 	}
-	s.mu.Lock()
+	defer s.mu.Lock("Take2")()
 	log.Infof("client %s takes the session", c.Name())
-	defer s.mu.Unlock()
 	for oc := range s.clients {
 		if oc == c {
 			continue
 		}
-		oc.mu.Lock()
+		unlock := oc.mu.Lock("Take3")
 		if oc.primary {
 			oc.primary = false
 			oc.SendLocked(preemptMessage, nil)
 		}
-		oc.mu.Unlock()
+		unlock()
 	}
 	c.primary = true
 	c.SendLocked(primaryMessage, nil) // The client should reforward things
@@ -253,14 +253,15 @@ func (s *Shell) Take(c *Client, requestSize bool) {
 
 func (s *Shell) Detach(c *Client) {
 	log.Infof("detach client %s", c.Name())
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.mu.Lock("Detach")()
 	delete(s.clients, c)
-	s.wg.Done()
+	// s.wg.Done()
 }
 
 func (s *Shell) Write(buf []byte) (int, error) {
+checkStdin()
 	n, err := s.pty.Write(buf)
+checkStdin()
 	if err != nil {
 		log.DepthErrorf(1, "pty write: %v", err)
 	}
@@ -282,15 +283,29 @@ func (s *Shell) Done() bool {
 }
 
 func (s *Shell) runout() {
+	defer func() {
+		log.Errorf("runout is returning")
+                if p := recover(); p != nil {
+                        log.Errorf("Panic: %v", p)
+			log.DumpGoroutines()
+                        panic(p)
+                }
+
+	}()
 	var buf [8192]byte
+checkStdin()
 	r, err := s.pty.Read(buf[:])
+checkStdin()
 	close(s.started)
 	for {
 		if func() bool {
-			s.mu.Lock()
-			defer s.mu.Unlock()
+			unlock := s.mu.Lock("runout1")
+			defer func() { unlock() }()
+
 			if r > 0 {
+checkStdin()
 				s.eb.Write(buf[:r])
+checkStdin()
 				nbuf := append([]byte{}, buf[:r]...)
 				for c := range s.clients {
 					if !c.Output(nbuf) {
@@ -306,13 +321,13 @@ func (s *Shell) runout() {
 					c := c
 					delete(s.clients, c)
 					go func() {
-						c.Close()
+						checkClose(c)
 						s.wg.Done()
 					}()
 				}
-				s.mu.Unlock()
+				unlock()
 				s.wg.Wait()
-				s.mu.Lock()
+				unlock = s.mu.Lock("runout2")
 				close(s.done)
 				return true
 			}
@@ -320,7 +335,9 @@ func (s *Shell) runout() {
 		}() {
 			return
 		}
+checkStdin()
 		r, err = s.pty.Read(buf[:])
+checkStdin()
 		if err != nil {
 			log.Errorf("pty read: %v", err)
 		}
@@ -354,7 +371,9 @@ func (s *Shell) Start(debug bool) error {
 		return err
 	}
 
-	defer tty.Close()
+	defer func () {
+		checkClose(tty)
+	}()
 	s.cmd.Stdout = tty
 	s.cmd.Stdin = tty
 	s.cmd.Stderr = tty
@@ -364,7 +383,7 @@ func (s *Shell) Start(debug bool) error {
 	}
 	err = s.cmd.Start()
 	if err != nil {
-		fd.Close()
+		checkClose(fd)
 		return err
 	}
 	s.pty = fd
@@ -381,8 +400,7 @@ func (s *Shell) Start(debug bool) error {
 }
 
 func (s *Shell) Exit() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.mu.Lock("Exit")()
 	if s.exiting {
 		return
 	}
@@ -391,13 +409,12 @@ func (s *Shell) Exit() {
 		if s.eb.inalt {
 			c.Output([]byte(nsbrc))
 		}
-		c.Close()
+		checkClose(c)
 	}
 }
 
 func (s *Shell) List(me *Client) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.mu.Lock("List")()
 	lines := make([]string, 0, len(s.clients))
 	for c := range s.clients {
 		name := c.Name()
@@ -415,6 +432,8 @@ func (s *Shell) List(me *Client) {
 }
 
 func (s *Shell) Setsize(rows, cols int) error {
+checkStdin()
 	s.scr.Winch(rows, cols)
+checkStdin()
 	return setsize(s.pty, rows, cols)
 }

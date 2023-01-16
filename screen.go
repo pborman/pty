@@ -4,6 +4,7 @@ import (
 	"io"
 
 	"github.com/pborman/pty/ansi"
+	"github.com/pborman/pty/log"
 	"golang.org/x/text/width"
 )
 
@@ -196,6 +197,15 @@ func (s *Screen) Write(buf []byte) (int, error) {
 }
 
 func (s *Screen) run() {
+	defer func() {
+		log.Errorf("Screen is done")
+                if p := recover(); p != nil {
+                        log.Errorf("Panic: %v", p)
+                        log.DumpStack()
+                        panic(p)
+                }
+
+	}()
 	d := ansi.NewReader(s.pr)
 	unknown := map[ansi.Name]bool{}
 	for {

@@ -6,11 +6,14 @@ import (
 	"net"
 	"os"
 	"sync"
+
+	"github.com/pborman/pty/mutex"
+	"github.com/pborman/pty/log"
 )
 
 type forwarder struct {
 	lconn  net.Listener
-	mu     sync.Mutex
+	mu     *mutex.Mutex
 	remote string
 }
 
@@ -26,9 +29,8 @@ func SetForwarder(name, remote string) error {
 	if f == nil {
 		return fmt.Errorf("no such socket: %s", name)
 	}
-	f.mu.Lock()
+	defer f.mu.Lock("SetForwarder")()
 	f.remote = remote
-	f.mu.Unlock()
 	return nil
 }
 
@@ -42,6 +44,7 @@ func NewForwarder(name, socket string) error {
 		return err
 	}
 	f := &forwarder{
+		mu:    mutex.New("Forwarder: " + name),
 		lconn: conn,
 	}
 	forwardersMu.Lock()
@@ -56,14 +59,15 @@ func (f *forwarder) server() {
 		c, err := f.lconn.Accept()
 		if err != nil {
 			// send some sort of message?
+			log.Infof("Accept: %v", err)
 			return
 		}
 		go func() {
-			f.mu.Lock()
+			unlock := f.mu.Lock("server")
 			remote := f.remote
-			f.mu.Unlock()
+			unlock()
 			f.session(c, remote)
-			c.Close()
+			checkClose(c)
 		}()
 	}
 }
@@ -92,6 +96,6 @@ func (f *forwarder) session(c net.Conn, remote string) error {
 		wg.Done()
 	}()
 	wg.Wait()
-	rc.Close()
+	checkClose(rc)
 	return nil
 }

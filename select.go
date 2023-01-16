@@ -12,7 +12,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+
+	"github.com/pborman/pty/log"
 )
 
 const (
@@ -46,6 +49,14 @@ func splur(s int) string {
 	return "s"
 }
 
+var loginShell = os.Getenv("SHELL")
+
+func execsh() {
+	sh := "-" + filepath.Base(loginShell)
+	err := syscall.Exec(loginShell, []string{sh}, os.Environ())
+	exitf("exec failed with %v", err)
+}
+
 // Select session returns the path to the selected session.  If the returned
 // bool is true then this session must be created.  An error is returned if
 // there was an error reading the name of the session.
@@ -55,14 +66,30 @@ func SelectSession() (name string, _ bool, err error) {
 		if name != "" {
 			name = filepath.Join(user.HomeDir, rcdir, prefix+name)
 		}
+		if p := recover(); p != nil {
+			log.Errorf("Panic: %v", p)
+			log.DumpGoroutines()
+			panic(p)
+		}
+
 	}()
 	sessions := GetSessions()
 	if len(sessions) == 0 {
-		fmt.Printf("Name of session to create: ")
+		if loginShell != "" {
+			fmt.Printf("Name of session to create (or shell): ")
+		} else {
+			fmt.Printf("Name of session to create: ")
+		}
 		name, err = readline()
+		if loginShell != "" && name == "shell" {
+			execsh()
+		}
 		return name, name != "", err
 	}
 	fmt.Printf("Current sessions:\n")
+	if loginShell != "" {
+		fmt.Printf("   -1) Spawn %s\n", loginShell)
+	}
 	fmt.Printf("    0) Create a new session\n")
 	for i, si := range sessions {
 		fmt.Printf("    %d) %s (%d Client%s)\n", i+1, si.Name, si.Count, splur(si.Count))
@@ -90,6 +117,9 @@ Loop:
 			return "", false, nil
 		}
 		if n, err := strconv.Atoi(name); err == nil {
+			if n == -1 && loginShell != "" {
+				execsh()
+			}
 			if n == 0 {
 				fmt.Printf("Name of session to create: ")
 				name, err = readline()
@@ -140,7 +170,9 @@ func readline() (string, error) {
 		if i == len(buf) {
 			i--
 		}
+		checkStdin()
 		_, err := os.Stdin.Read(buf[i : i+1])
+		checkStdin()
 		if err != nil {
 			return "", err
 		}
@@ -164,9 +196,8 @@ func GetSessions() []SessionInfo {
 		return nil
 	}
 	dirs, _ := fd.Readdirnames(-1)
-	fd.Close()
+	checkClose(fd)
 	ch := make(chan SessionInfo)
-
 	var wg sync.WaitGroup
 
 	for _, name := range dirs {
@@ -226,32 +257,49 @@ func SessionPath(session string) string {
 }
 
 func CheckSession(socket string) (cnt, pid int, err error) {
+log.Infof("Dialing %s", socket)
 	client, err := net.DialUnix("unix", nil, &net.UnixAddr{
 		Name: socket,
 		Net:  "unix",
 	})
 	if err != nil {
+log.Infof("Dialing %s %v", socket, err)
 		os.Remove(socket)
 		if strings.Contains(err.Error(), "connect: connection refused") {
 			return 0, 0, removedErr
 		}
 		return 0, 0, err
 	}
-	defer client.Close()
+	defer checkClose(client)
+
 	w := NewMessengerWriter(client)
 	w.Sendf(askCountMessage, "")
 	ch := make(chan string, 2)
+
 	r := NewMessengerReader(client, func(kind messageKind, data []byte) {
+log.Infof("Got message kind %v", kind)
 		switch kind {
 		case countMessage:
 			ch <- string(data)
 		}
 	})
+
 	go func() {
+		var err error
+		defer func() {
+			log.Errorf("CheckSession %s: %v", socket, err)
+			if p := recover(); p != nil {
+				log.Errorf("Panic: %v", p)
+				log.DumpGoroutines()
+				panic(p)
+			}
+
+		}()
 		var buf [256]byte
+log.Infof("Starting to read %s", socket)
 		for {
-			_, err := r.Read(buf[:])
-			if err != nil {
+			if _, err = r.Read(buf[:]); err != nil {
+log.Infof("Done reading %s", socket)
 				return
 			}
 		}

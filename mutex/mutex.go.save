@@ -1,0 +1,141 @@
+package mutex
+
+import (
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/pborman/pty/log"
+)
+
+var CheckStdin = func(){}
+
+type Mutex struct {
+	msg      string
+	mu       sync.Mutex
+	imu      sync.Mutex
+	waiters  map[waiter]bool
+	waitTime time.Duration
+	owner    string
+}
+
+type waiter *int
+
+// New returns a new named mutex.
+func New(msg string) *Mutex {
+	m := &Mutex{
+		msg:      msg,
+		waiters:  map[waiter]bool{},
+		waitTime: time.Second * 5,
+	}
+	m.logf("created")
+	return m
+}
+
+func (m *Mutex) SetWait(d time.Duration) {
+return
+	m.imu.Lock()
+	m.waitTime = d
+	if len(m.waiters) != 0 {
+		m.logf("has existing waiters")
+	}
+	m.imu.Unlock()
+}
+
+func (m *Mutex)logf(format string, args ...interface{}) {
+	format = fmt.Sprintf("%p:%s: %s", m, m.msg, format)
+	log.Outputf(3, "M", format, args...)
+}
+
+// locked executes f with our internal mutex locked.
+func (m *Mutex) locked(f func()) {
+panic("not using this")
+	m.imu.Lock()
+	f()
+	m.imu.Unlock()
+}
+
+// Lock locks a mutex and returns the function to unlock the mutex.
+func (m *Mutex) Lock(msg string) func() {
+CheckStdin()
+m.mu.Lock()
+CheckStdin()
+	return func() {
+CheckStdin()
+		m.mu.Unlock()
+CheckStdin()
+	}
+panic("not here")
+	now := time.Now()
+CheckStdin()
+	var n int
+	w := waiter(&n)
+	var t *time.Timer
+
+CheckStdin()
+	m.locked(func() {
+		t = time.NewTimer(time.Hour)
+		m.waiters[w] = true
+	})
+CheckStdin()
+
+	if false {
+	go func() {
+		<-t.C
+
+		m.locked(func() {
+			if m.waiters[w] {
+				m.logf("timedout out for %s waiting for %s after %v", msg, m.owner, now.Sub(time.Now()))
+			}
+		})
+	}()
+	}
+
+CheckStdin()
+	m.mu.Lock()
+	// m.logf("%s took lock", msg)
+CheckStdin()
+
+	m.locked(func() {
+CheckStdin()
+		m.owner = msg
+		delete(m.waiters, w)
+		t.Reset(m.waitTime)
+CheckStdin()
+	})
+CheckStdin()
+	m.locked(func() {
+CheckStdin()
+		if m.waiters[w] {
+CheckStdin()
+			m.logf("I thought I just deleted you!", msg)
+		}
+	})
+
+	return func() {
+CheckStdin()
+		m.mu.Unlock()
+		return
+CheckStdin()
+		var owner string
+CheckStdin()
+		m.locked(func() {
+CheckStdin()
+			owner = m.owner
+CheckStdin()
+			m.owner = ""
+		})
+CheckStdin()
+		_ = owner
+CheckStdin()
+		m.logf("%s releasing lock", owner)
+CheckStdin()
+
+		m.mu.Unlock()
+CheckStdin()
+		t.Stop()
+CheckStdin()
+		t.Reset(1)
+CheckStdin()
+	}
+}

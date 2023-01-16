@@ -1,6 +1,7 @@
 package log
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -29,6 +31,25 @@ type Logger struct {
 }
 
 var logger *Logger
+
+func Standard() *Logger { return logger }
+
+func Me() string {
+        var me string
+        for i := 1; i < 15; i++ {
+                pc, file, _, ok := runtime.Caller(i)
+                if !ok {
+                        break
+                }
+                if strings.Contains(file, "github.com/pborman/pty") {
+                        if f := runtime.FuncForPC(pc); f != nil {
+                                me = f.Name()
+                                me = me[strings.LastIndex(me, ".")+1:]
+                        }
+                }
+        }
+	return me
+}
 
 // Init initializes the logging system.
 func Init(path string) error {
@@ -78,6 +99,16 @@ func NewLogger(path string) (*Logger, error) {
 		}
 	}()
 	return log, nil
+}
+
+func TakeStderr() {
+	if f, ok := logger.fd.(*os.File); ok {
+		Infof("Taking over stderr")
+		syscall.Dup2(int(f.Fd()), 2)
+		fmt.Fprintf(os.Stderr, "Took over stderr")
+	} else {
+		Infof("Failed to take over stderr")
+	}
 }
 
 const pformat = "20060102.150405"
@@ -165,9 +196,10 @@ func last2(path string) string {
 	return path[n+1:]
 }
 
+func (l *Logger) Info(v ...interface{}) {
+	l.Outputf(2, "I", "%s", fmt.Sprint(v...))
+}
 func (l *Logger) Outputf(depth int, prefix string, format string, v ...interface{}) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	_, file, line, ok := runtime.Caller(depth + 1)
 	if !ok {
 		file = "???"
@@ -179,12 +211,20 @@ func (l *Logger) Outputf(depth int, prefix string, format string, v ...interface
 	if len(msg) > 0 && msg[len(msg)-1] == '\n' {
 		msg = msg[:len(msg)-1]
 	}
-	fmt.Fprintf(l.fd, "%s%s %s:%d] %s\n", prefix, time.Now().Format("150304.000"), file, line, msg)
+	msg = fmt.Sprintf("%s%s %s: %s:%d] %s\n", prefix, time.Now().Format("15:04:05.000"), Me(), file, line, msg)
+	if l == nil {
+		fmt.Fprint(os.Stderr, msg)
+		return
+	}
+	l.mu.Lock()
+	fmt.Fprintf(l.fd, msg)
+	l.mu.Unlock()
 }
 
-func Errorf(format string, v ...interface{}) { logger.Outputf(1, "E", format, v...) }
-func Warnf(format string, v ...interface{})  { logger.Outputf(1, "W", format, v...) }
-func Infof(format string, v ...interface{})  { logger.Outputf(1, "I", format, v...) }
+func Errorf(format string, v ...interface{})            { logger.Outputf(1, "E", format, v...) }
+func Warnf(format string, v ...interface{})             { logger.Outputf(1, "W", format, v...) }
+func Infof(format string, v ...interface{})             { logger.Outputf(1, "I", format, v...) }
+func Outputf(n int, p, format string, v ...interface{}) { logger.Outputf(n, p, format, v...) }
 
 func DepthErrorf(depth int, format string, v ...interface{}) {
 	logger.Outputf(depth+1, "E", format, v...)
@@ -200,16 +240,37 @@ func (log *Logger) Errorf(format string, v ...interface{}) { log.Outputf(1, "E",
 func (log *Logger) Warnf(format string, v ...interface{})  { log.Outputf(1, "W", format, v...) }
 func (log *Logger) Infof(format string, v ...interface{})  { log.Outputf(1, "I", format, v...) }
 
-func (log *Logger) LogStack() {
+func (log *Logger) DumpGoroutines() {
 	if p := pprof.Lookup("goroutine"); p != nil {
+		var b bytes.Buffer
+		p.WriteTo(&b, 2)
 		log.Errorf("Dumping current goroutines")
 		log.mu.Lock()
 		log.fd.Write([]byte{'\n'})
-		p.WriteTo(log.fd, 2)
+		log.fd.Write(CleanStack(b.Bytes()))
 		log.fd.Write([]byte{'\n'})
 		log.mu.Unlock()
 	} else {
 		log.Errorf("failed to lookup goroutine profile")
 	}
 }
-func LogStack() { logger.LogStack() }
+
+func (log *Logger) DumpStack() {
+	n := 15
+	for i := 1; i <= n; i++ {
+		pc, file, line, ok := runtime.Caller(i)
+		if !ok {
+			break
+		}
+		fname := ""
+		if f := runtime.FuncForPC(pc); f != nil {
+			fname = f.Name()
+			fname = fname[strings.LastIndex(fname, ".")+1:]
+		}
+		log.Infof("%s:%d %s()", file, line, fname)
+	}
+
+}
+
+func DumpGoroutines() { logger.DumpGoroutines() }
+func DumpStack()      { logger.DumpStack() }
