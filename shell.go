@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pborman/pty/mutex"
 	"github.com/kr/pty"
 	"github.com/pborman/pty/log"
+	"github.com/pborman/pty/mutex"
 )
 
 var LoginShell string
@@ -77,7 +77,7 @@ var messageNames = map[messageKind]string{
 	psMessage:        "psMessage",
 	pingMessage:      "pingMessage",
 	ackMessage:       "ackMessage",
-	dumpMessage:       "dumpMessage",
+	dumpMessage:      "dumpMessage",
 }
 
 func (m messageKind) String() string {
@@ -259,9 +259,7 @@ func (s *Shell) Detach(c *Client) {
 }
 
 func (s *Shell) Write(buf []byte) (int, error) {
-checkStdin()
 	n, err := s.pty.Write(buf)
-checkStdin()
 	if err != nil {
 		log.DepthErrorf(1, "pty write: %v", err)
 	}
@@ -285,17 +283,15 @@ func (s *Shell) Done() bool {
 func (s *Shell) runout() {
 	defer func() {
 		log.Errorf("runout is returning")
-                if p := recover(); p != nil {
-                        log.Errorf("Panic: %v", p)
+		if p := recover(); p != nil {
+			log.Errorf("Panic: %v", p)
 			log.DumpGoroutines()
-                        panic(p)
-                }
+			panic(p)
+		}
 
 	}()
 	var buf [8192]byte
-checkStdin()
 	r, err := s.pty.Read(buf[:])
-checkStdin()
 	close(s.started)
 	for {
 		if func() bool {
@@ -303,9 +299,7 @@ checkStdin()
 			defer func() { unlock() }()
 
 			if r > 0 {
-checkStdin()
 				s.eb.Write(buf[:r])
-checkStdin()
 				nbuf := append([]byte{}, buf[:r]...)
 				for c := range s.clients {
 					if !c.Output(nbuf) {
@@ -335,9 +329,7 @@ checkStdin()
 		}() {
 			return
 		}
-checkStdin()
 		r, err = s.pty.Read(buf[:])
-checkStdin()
 		if err != nil {
 			log.Errorf("pty read: %v", err)
 		}
@@ -371,7 +363,7 @@ func (s *Shell) Start(debug bool) error {
 		return err
 	}
 
-	defer func () {
+	defer func() {
 		checkClose(tty)
 	}()
 	s.cmd.Stdout = tty
@@ -432,8 +424,6 @@ func (s *Shell) List(me *Client) {
 }
 
 func (s *Shell) Setsize(rows, cols int) error {
-checkStdin()
 	s.scr.Winch(rows, cols)
-checkStdin()
 	return setsize(s.pty, rows, cols)
 }

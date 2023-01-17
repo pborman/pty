@@ -173,7 +173,7 @@ func writeFull(conn io.ReadWriter, buf []byte) error {
 }
 
 type Channel struct {
-	rw   io.ReadWriteCloser
+	rw  io.ReadWriteCloser
 	in  cipher.StreamReader
 	out cipher.StreamWriter
 }

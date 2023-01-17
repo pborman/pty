@@ -124,7 +124,10 @@ func checkClose(fd interface{}) error {
 	if ioc, ok := fd.(io.Closer); ok {
 		log.Infof("Closing %d %s %T", fno, name, fd)
 		log.DumpStack()
-		return ioc.Close()
+		go func() {
+			ioc.Close()
+		}()
+		return nil
 	}
 	return nil
 }
@@ -150,11 +153,8 @@ func (c *Client) SetName(name string) {
 
 // runout writes queued output from Output to the client's io.Writer.
 func (c *Client) runout() {
-checkStdin()
 	defer func() {
-checkStdin()
 		log.Errorf("returning from runout")
-checkStdin()
 		if p := recover(); p != nil {
 			log.Errorf("Panic: %v", p)
 			log.DumpGoroutines()
@@ -162,46 +162,30 @@ checkStdin()
 		}
 	}()
 	defer close(c.done)
-checkStdin()
 	ready := c.ready
-checkStdin()
 	for {
-checkStdin()
 		select {
 		case _, ok := <-ready:
-checkStdin()
 			if !ok {
 				return
 			}
 		case <-c.quit:
-checkStdin()
 			return
 		}
-checkStdin()
 		for {
-checkStdin()
 			m := c.nextBuf()
-checkStdin()
 			if m.kind == 0 && m.data == nil {
-checkStdin()
 				break
 			}
-checkStdin()
 			if m.kind == 0 {
-checkStdin()
 				if _, err := c.out.Write(m.data); err != nil {
-checkStdin()
-log.Infof("%v", err)
+					log.Infof("%v", err)
 				}
-checkStdin()
 			} else if w, ok := c.out.(*MessengerWriter); ok {
-checkStdin()
 				w.Send(m.kind, m.data)
-checkStdin()
 			}
 		}
 	}
-checkStdin()
 }
 
 func displayMotd() {
@@ -211,7 +195,7 @@ func displayMotd() {
 		return
 	}
 	if _, err := os.Stdout.Write(data); err != nil {
-log.Infof("%v", err)
+		log.Infof("%v", err)
 	}
 	fmt.Printf("Press ENTER to continue: ")
 	var buf [1]byte

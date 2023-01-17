@@ -10,7 +10,7 @@ func TestMessengerWriter(t *testing.T) {
 
 	bigbytes := make([]byte, 0x01020304)
 	for i := range bigbytes {
-		bigbytes[i] = 'a' + byte(i % 26)
+		bigbytes[i] = 'a' + byte(i%26)
 	}
 	bigstring := string(bigbytes)
 
@@ -43,7 +43,7 @@ func TestMessengerWriter(t *testing.T) {
 		{
 			kind:    5,
 			message: bigstring,
-			want:    string([]byte{1,2,3,4,5}) + bigstring,
+			want:    string([]byte{1, 2, 3, 4, 5}) + bigstring,
 		},
 	} {
 		var buf bytes.Buffer
