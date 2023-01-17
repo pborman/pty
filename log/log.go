@@ -34,6 +34,8 @@ var logger *Logger
 
 func Standard() *Logger { return logger }
 
+// Me returns the the function name of the deepest stack frame that is part of
+// the pty program.
 func Me() string {
 	var me string
 	for i := 1; i < 15; i++ {

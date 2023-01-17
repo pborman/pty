@@ -8,8 +8,6 @@ import (
 	"github.com/pborman/pty/log"
 )
 
-var CheckStdin = func() {}
-
 type Mutex struct {
 	msg string
 	mu  sync.Mutex
@@ -36,13 +34,9 @@ func (m *Mutex) logf(format string, args ...interface{}) {
 
 // Lock locks a mutex and returns the function to unlock the mutex.
 func (m *Mutex) Lock(msg string) func() {
-	CheckStdin()
 	m.mu.Lock()
-	CheckStdin()
 
 	return func() {
-		CheckStdin()
 		m.mu.Unlock()
-		CheckStdin()
 	}
 }

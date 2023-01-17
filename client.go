@@ -30,7 +30,6 @@ type Client struct {
 
 // NewClient returns a freshly initialized client that writes output to out.
 func NewClient(out io.Writer) *Client {
-	log.Infof("Added new client")
 	c := &Client{
 		mu:    mutex.New("New Client"),
 		out:   out,
@@ -108,7 +107,7 @@ func getFD(fd interface{}) (string, int) {
 	if f, ok := fd.(filer); ok {
 		f1, err := f.File()
 		if err != nil {
-			log.Errorf("closing %v", err)
+			log.Errorf("getting fd %v", err)
 			log.DumpStack()
 			return name, -1
 		}
@@ -153,14 +152,6 @@ func (c *Client) SetName(name string) {
 
 // runout writes queued output from Output to the client's io.Writer.
 func (c *Client) runout() {
-	defer func() {
-		log.Errorf("returning from runout")
-		if p := recover(); p != nil {
-			log.Errorf("Panic: %v", p)
-			log.DumpGoroutines()
-			panic(p)
-		}
-	}()
 	defer close(c.done)
 	ready := c.ready
 	for {

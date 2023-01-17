@@ -21,7 +21,6 @@ func shell(socket string, debug bool) {
 	}
 	go func() {
 		s.Wait()
-		log.Errorf("Shell exiting")
 		os.Exit(0)
 	}()
 
@@ -33,15 +32,6 @@ func shell(socket string, debug bool) {
 	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, syscall.SIGABRT, syscall.SIGBUS, syscall.SIGQUIT, syscall.SIGSEGV)
 	go func() {
-		defer func() {
-			log.Errorf("Existing from signal watcher")
-			if p := recover(); p != nil {
-				log.Errorf("Panic: %v", p)
-				log.DumpGoroutines()
-				panic(p)
-			}
-
-		}()
 		for s := range ch {
 			log.Errorf("signal %v", s)
 			log.DumpGoroutines()
@@ -74,17 +64,7 @@ func attach(c net.Conn, s *Shell) {
 
 	ech := make(chan error, 1)
 	go func() {
-		defer func() {
-			log.Errorf("exiting from attach")
-			if p := recover(); p != nil {
-				log.Errorf("Panic: %v", p)
-				log.DumpGoroutines()
-				panic(p)
-			}
-
-		}()
 		r := NewMessengerReader(c, func(kind messageKind, msg []byte) {
-			log.Infof("received message %q", kind)
 			switch kind {
 			case psMessage:
 				mw.Send(psMessage, []byte(PS(os.Getpid())))

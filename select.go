@@ -317,8 +317,6 @@ func CheckSession(socket string) (cnt, pid int, err error) {
 	ch := make(chan string, 2)
 
 	r := NewMessengerReader(client, func(kind messageKind, data []byte) {
-		fmt.Printf("Got message kind %v\n", kind)
-		log.Infof("Got message kind %v", kind)
 		switch kind {
 		case startMessage:
 			w.Sendf(askCountMessage, "")
@@ -329,17 +327,7 @@ func CheckSession(socket string) (cnt, pid int, err error) {
 
 	go func() {
 		var err error
-		defer func() {
-			log.Errorf("CheckSession %s: %v", socket, err)
-			if p := recover(); p != nil {
-				log.Errorf("Panic: %v", p)
-				log.DumpGoroutines()
-				panic(p)
-			}
-
-		}()
 		var buf [256]byte
-		log.Infof("Starting to read %s", socket)
 		for {
 			if _, err = r.Read(buf[:]); err != nil {
 				log.Infof("Done reading %s", socket)

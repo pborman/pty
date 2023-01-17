@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"sync/atomic"
 	"time"
 
 	"github.com/pborman/pty/log"
@@ -17,8 +16,6 @@ type MessengerWriter struct {
 }
 
 func NewMessengerWriter(w io.Writer) *MessengerWriter {
-	name, fd := getFD(w)
-	log.Infof("New Messenger Writer %s %d", name, fd)
 	m := &MessengerWriter{
 		mu: mutex.New("NewMessengerWriter"),
 		w:  w,
@@ -32,7 +29,6 @@ func (m *MessengerWriter) Close() error {
 }
 
 func (m *MessengerWriter) Write(buf []byte) (int, error) {
-	log.Infof("Messenger write %d", len(buf))
 	x := bytes.IndexByte(buf, 0)
 	cnt := 0
 	for x >= 0 {
@@ -68,12 +64,7 @@ func (m *MessengerWriter) Sendf(kind messageKind, format string, v ...interface{
 	return m.Send(kind, buf.Bytes())
 }
 
-var ecnt int32
-
 func (m *MessengerWriter) Send(kind messageKind, buf []byte) (int, error) {
-	me := atomic.AddInt32(&ecnt, 1)
-	log.Infof("(%d) Enter Send", me)
-	defer log.Infof("(%d) Exit Send", me)
 	if kind == 0 {
 		return m.Write(buf)
 	}
@@ -124,25 +115,16 @@ type MessengerReader struct {
 }
 
 func NewMessengerReader(r io.Reader, handle func(messageKind, []byte)) *MessengerReader {
-	name, fd := getFD(r)
-	log.Infof("New Messenger Reader %s %d", name, fd)
 	return &MessengerReader{
 		mu:       mutex.New("NewMessengerReader"),
 		r:        r,
 		callback: handle,
-		message:  make([]byte, 1024),
+		message:  make([]byte, 32768),
 	}
 }
 
-var sem int32
-
 func (m *MessengerReader) Read(buf []byte) (cnt int, err error) {
-	log.Infof("%d in Read(%d)\r\n", atomic.AddInt32(&sem, 1), len(buf))
-	defer atomic.AddInt32(&sem, -1)
-	unlock := m.mu.Lock("messangerReader")
-	defer func() {
-		unlock()
-	}()
+	defer m.mu.Lock("messangerReader")()
 	for {
 		if len(buf) == 0 {
 			return cnt, nil
@@ -173,7 +155,6 @@ func (m *MessengerReader) Read(buf []byte) (cnt int, err error) {
 		}
 
 		// m.message[m.mh] is a NUL at this point
-		log.Errorf("Filling 2 bytes")
 		if !m.fill(2) {
 			return cnt, m.error
 		}
@@ -227,7 +208,6 @@ func (m *MessengerReader) fill(count int) bool {
 	if count == 0 {
 		return true
 	}
-	log.Infof("fill(%d) %d > %d", count, m.mh, m.mt)
 	if m.mh >= m.mt {
 		m.mh, m.mt = 0, 0
 		if m.error != nil {
@@ -248,9 +228,6 @@ func (m *MessengerReader) fill(count int) bool {
 		}
 		var n int
 		n, m.error = m.r.Read(m.message[m.mt:])
-		if m.error != nil {
-			log.Infof("%v", m.error)
-		}
 		m.mt += n
 		if n == 0 && m.error == nil {
 			m.error = io.EOF

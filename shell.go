@@ -281,15 +281,6 @@ func (s *Shell) Done() bool {
 }
 
 func (s *Shell) runout() {
-	defer func() {
-		log.Errorf("runout is returning")
-		if p := recover(); p != nil {
-			log.Errorf("Panic: %v", p)
-			log.DumpGoroutines()
-			panic(p)
-		}
-
-	}()
 	var buf [8192]byte
 	r, err := s.pty.Read(buf[:])
 	close(s.started)

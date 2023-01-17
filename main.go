@@ -28,9 +28,6 @@ var (
 	copyFD int
 )
 
-func init() {
-}
-
 var pprofFd *os.File
 
 func main() {
@@ -43,13 +40,7 @@ func main() {
 	if err != nil {
 		exitf("no pty dir: %v", err)
 	}
-	defer func() {
-		if p := recover(); p != nil {
-			log.Errorf("Panic: %v", p)
-			log.DumpGoroutines()
-			panic(p)
-		}
-	}()
+
 	if fi.Mode()&0777 != 0700 {
 		exitf("pty dir has mode %v, want %v", fi.Mode(), os.FileMode(os.ModeDir|0700))
 	}
@@ -156,7 +147,7 @@ func main() {
 		if *debugServer {
 			debugFile = session + debugSuffix
 		}
-		log.Infof("SPAWN NEW SERVER")
+
 		spawnServer(session, debugFile, *debugFlag)
 		if *detach {
 			return
@@ -191,14 +182,7 @@ func main() {
 	w := NewMessengerWriter(c)
 	ready := make(chan struct{})
 	go func() {
-		defer func() {
-			log.Errorf("MessengerReader is done")
-			if p := recover(); p != nil {
-				log.Errorf("Panic: %v", p)
-				log.DumpGoroutines()
-				panic(p)
-			}
-		}()
+
 		mr := NewMessengerReader(c, func(kind messageKind, data []byte) {
 			clientCommand(w, kind, data, ready)
 		})
@@ -211,7 +195,7 @@ func main() {
 				if _, err := os.Stdout.Write(buf[:n]); err != nil {
 					log.Errorf("Writing to stdout: %v", err)
 				}
-				// tee.Write(buf[:n])
+				tee.Write(buf[:n])
 			}
 		}
 		if err != nil && err != io.EOF {
@@ -232,24 +216,7 @@ func main() {
 		log.Infof("%d Reading from stdin", rcnt)
 		rcnt++
 		n, rerr := os.Stdin.Read(buf[:])
-		if rerr != nil {
-			exitf("%v", err)
-		}
-		if n == 0 {
-			log.Errorf("Stdin(%d) returned %v", os.Stdin.Fd(), rerr)
-			stdin, err := os.Open("/dev/stdin")
-			if err != nil {
-				exitf("%v", err)
-			}
-			if err := syscall.Dup2(int(stdin.Fd()), 0); err != nil {
-				exitf("%v", err)
-			}
-			n, rerr = os.Stdin.Read(buf[:])
-			if n == 0 {
-				exitf(" after reopening: %v", rerr)
-			}
-		}
-		log.Infof("Read %d", n)
+
 		var cmd byte
 		if tilde != 0 {
 		Loop:
@@ -324,7 +291,7 @@ func main() {
 			}
 			command(true, w, args...)
 		}
-		log.Infof("finished command %q", cmd)
+
 		state = 0
 		if rerr != nil {
 			log.Errorf("client read from stdin(%d): %v", os.Stdin.Fd(), rerr)
@@ -455,7 +422,6 @@ var tee = teeer{
 }
 
 func (t *teeer) Write(buf []byte) (int, error) {
-	return len(buf), nil // we are not using tee so we don't want mutex log messages
 	unlock := t.mu.Lock("Write")
 	w := t.w
 	unlock()
@@ -466,7 +432,6 @@ func (t *teeer) Write(buf []byte) (int, error) {
 }
 
 func (t *teeer) Open(path string) {
-	log.Infof("Opening tee")
 	if path == "-" {
 		unlock := t.mu.Lock("Open1")
 		if t.w != nil {
@@ -621,14 +586,7 @@ func watchSigwinch(w *MessengerWriter) error {
 		return nil
 	}
 	go func() {
-		defer func() {
-			log.Errorf("watchSigwinch is done")
-			if p := recover(); p != nil {
-				log.Errorf("Panic: %v", p)
-				log.DumpGoroutines()
-				panic(p)
-			}
-		}()
+
 		ch := make(chan os.Signal, 2)
 		signal.Notify(ch, syscall.SIGWINCH)
 		for range ch {
