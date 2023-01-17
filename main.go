@@ -481,7 +481,7 @@ func command(raw bool, w *MessengerWriter, args ...string) {
 		fmt.Printf("  env    - display environment variables\n")
 		fmt.Printf("  list   - list all clients\n")
 		fmt.Printf("  save   - save buffer to FILE\n")
-		fmt.Printf("  setenv - list all clients\n")
+		fmt.Printf("  setenv - forward environtment variables\n")
 		fmt.Printf("  ssh    - forward SSH_AUTH_SOCK\n")
 		fmt.Printf("  tee    - tee all future output to FILE (- to close)\n")
 		fmt.Printf("  ps     - display processes on this pty\n")
