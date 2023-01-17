@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	osuser "os/user"
@@ -170,9 +171,7 @@ func readline() (string, error) {
 		if i == len(buf) {
 			i--
 		}
-		checkStdin()
 		_, err := os.Stdin.Read(buf[i : i+1])
-		checkStdin()
 		if err != nil {
 			return "", err
 		}
@@ -211,13 +210,6 @@ func GetSessions() []SessionInfo {
 			continue
 		}
 		path := filepath.Join(dir, name)
-		fi, err := os.Stat(path)
-		if err != nil {
-			continue
-		}
-		if fi.Mode()&os.ModeSocket == 0 {
-			continue
-		}
 		name := name
 		wg.Add(1)
 		go func() {
@@ -256,29 +248,80 @@ func SessionPath(session string) string {
 	return filepath.Join(user.HomeDir, rcdir, prefix+session)
 }
 
-func CheckSession(socket string) (cnt, pid int, err error) {
-log.Infof("Dialing %s", socket)
-	client, err := net.DialUnix("unix", nil, &net.UnixAddr{
-		Name: socket,
-		Net:  "unix",
-	})
+func ListenSocket(socket string) (net.Listener, error) {
+	addr := &net.TCPAddr{
+		IP: net.IPv4(127, 0, 0, 1),
+	}
+	conn, err := net.ListenTCP("tcp", addr)
 	if err != nil {
-log.Infof("Dialing %s %v", socket, err)
+		exitf("server: %v", err)
+	}
+	os.Remove(socket)
+	fd, err := os.Create(socket)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if _, err := fmt.Fprintf(fd, "%s", conn.Addr()); err != nil {
+		os.Remove(socket)
+		conn.Close()
+		return nil, err
+	}
+	if err := fd.Close(); err != nil {
+		os.Remove(socket)
+		conn.Close()
+		return nil, err
+	}
+	return conn, nil
+
+}
+
+func DialSocket(socket string) (_ net.Conn, err error) {
+	start := time.Now()
+	var data []byte
+	for {
+		data, err = ioutil.ReadFile(socket)
+		if err == nil {
+			break
+		}
+		if time.Now().Sub(start) > time.Second*5 {
+			return nil, err
+		}
+		time.Sleep(time.Second / 10)
+	}
+	addr, err := net.ResolveTCPAddr("tcp", string(data))
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("Dial %s\n", addr)
+	return net.DialTCP("tcp", nil, addr)
+}
+
+func CheckSession(socket string) (cnt, pid int, err error) {
+	log.Infof("Dialing %s", socket)
+	client, err := DialSocket(socket)
+	if err != nil {
+		log.Infof("Dialing %s %v", socket, err)
 		os.Remove(socket)
 		if strings.Contains(err.Error(), "connect: connection refused") {
 			return 0, 0, removedErr
 		}
 		return 0, 0, err
 	}
-	defer checkClose(client)
+	defer func() {
+		checkClose(client)
+	}()
 
 	w := NewMessengerWriter(client)
 	w.Sendf(askCountMessage, "")
 	ch := make(chan string, 2)
 
 	r := NewMessengerReader(client, func(kind messageKind, data []byte) {
-log.Infof("Got message kind %v", kind)
+		fmt.Printf("Got message kind %v\n", kind)
+		log.Infof("Got message kind %v", kind)
 		switch kind {
+		case startMessage:
+			w.Sendf(askCountMessage, "")
 		case countMessage:
 			ch <- string(data)
 		}
@@ -296,10 +339,10 @@ log.Infof("Got message kind %v", kind)
 
 		}()
 		var buf [256]byte
-log.Infof("Starting to read %s", socket)
+		log.Infof("Starting to read %s", socket)
 		for {
 			if _, err = r.Read(buf[:]); err != nil {
-log.Infof("Done reading %s", socket)
+				log.Infof("Done reading %s", socket)
 				return
 			}
 		}

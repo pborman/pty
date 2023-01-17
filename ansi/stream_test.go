@@ -38,9 +38,9 @@ func TestDecodeStream(t *testing.T) {
 	}
 }
 
-const input = `]2;/Users/prb/src/github.com/pborman/ptyPTY => PTY => vi
+const input = `]2;/Users/prb/src/github.com/pborman/ptyPTY => PTY => vi
 ./en_US.UTF-8: No such file or directory
-[1;40r(B[m[4l[?7h[?1h=]2;/Users/prb/src/github.com/pborman/ptyPTY => `
+[1;40r(B[m[4l[?7h[?1h=]2;/Users/prb/src/github.com/pborman/ptyPTY => `
 const input2 = `
 MN Linux => 
 MN Linux => vi pty   main.go

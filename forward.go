@@ -7,8 +7,8 @@ import (
 	"os"
 	"sync"
 
-	"github.com/pborman/pty/mutex"
 	"github.com/pborman/pty/log"
+	"github.com/pborman/pty/mutex"
 )
 
 type forwarder struct {
@@ -36,10 +36,7 @@ func SetForwarder(name, remote string) error {
 
 func NewForwarder(name, socket string) error {
 	os.Remove(socket)
-	conn, err := net.ListenUnix("unix", &net.UnixAddr{
-		Name: socket,
-		Net:  "unix",
-	})
+	conn, err := ListenSocket(socket)
 	if err != nil {
 		return err
 	}
@@ -77,10 +74,7 @@ func (f *forwarder) session(c net.Conn, remote string) error {
 		return fmt.Errorf("empty remote name")
 	}
 
-	rc, err := net.DialUnix("unix", nil, &net.UnixAddr{
-		Name: remote,
-		Net:  "unix",
-	})
+	rc, err := DialSocket(remote)
 	if err != nil {
 		return err
 	}

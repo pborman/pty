@@ -199,11 +199,11 @@ func (s *Screen) Write(buf []byte) (int, error) {
 func (s *Screen) run() {
 	defer func() {
 		log.Errorf("Screen is done")
-                if p := recover(); p != nil {
-                        log.Errorf("Panic: %v", p)
-                        log.DumpStack()
-                        panic(p)
-                }
+		if p := recover(); p != nil {
+			log.Errorf("Panic: %v", p)
+			log.DumpStack()
+			panic(p)
+		}
 
 	}()
 	d := ansi.NewReader(s.pr)

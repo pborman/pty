@@ -11,17 +11,17 @@ func TestParse(t *testing.T) {
 		out []string
 	}{
 		{},
-		{ in:  "abc", out: []string{"abc"} },
-		{ in:  "  abc", out: []string{"abc"} },
-		{ in:  "abc  ", out: []string{"abc"} },
-		{ in:  `" abc "`, out: []string{" abc "} },
-		{ in:  "  abc  ", out: []string{"abc"} },
-		{ in:  "abc def", out: []string{"abc", "def"}, },
-		{ in:  "abc   def", out: []string{"abc", "def"}, },
-		{ in:  "abc;def", out: []string{"abc", ";", "def"}, },
-		{ in:  "abc; def", out: []string{"abc", ";", "def"}, },
-		{ in:  "abc ; def", out: []string{"abc", ";", "def"}, },
-		{ in:  "abc|def", out: []string{"abc", "|", "def"}, },
+		{in: "abc", out: []string{"abc"}},
+		{in: "  abc", out: []string{"abc"}},
+		{in: "abc  ", out: []string{"abc"}},
+		{in: `" abc "`, out: []string{" abc "}},
+		{in: "  abc  ", out: []string{"abc"}},
+		{in: "abc def", out: []string{"abc", "def"}},
+		{in: "abc   def", out: []string{"abc", "def"}},
+		{in: "abc;def", out: []string{"abc", ";", "def"}},
+		{in: "abc; def", out: []string{"abc", ";", "def"}},
+		{in: "abc ; def", out: []string{"abc", ";", "def"}},
+		{in: "abc|def", out: []string{"abc", "|", "def"}},
 	} {
 		out, err := Line(tt.in)
 		if err != nil {

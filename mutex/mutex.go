@@ -11,8 +11,8 @@ import (
 var CheckStdin = func() {}
 
 type Mutex struct {
-	msg      string
-	mu       sync.Mutex
+	msg string
+	mu  sync.Mutex
 }
 
 type waiter *int

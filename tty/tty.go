@@ -45,7 +45,13 @@ func init() {
 // file descriptor or an error.  If fileno is not attached to a tty, ErrNotTTY
 // is returned.
 func Fileno(fileno int) (string, error) {
-	return File(os.NewFile(uintptr(fileno), "tty"))
+	// The Go runtime now closes fileno when our File goes out of scope.
+	// Dup the file descriptor so the runtime has something to close.
+	nfd, err := syscall.Dup(fileno)
+	if err != nil {
+		return "", err
+	}
+	return File(os.NewFile(uintptr(nfd), "tty"))
 }
 
 // File either returns the device name of the tty attached to the provided

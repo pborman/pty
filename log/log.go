@@ -35,19 +35,19 @@ var logger *Logger
 func Standard() *Logger { return logger }
 
 func Me() string {
-        var me string
-        for i := 1; i < 15; i++ {
-                pc, file, _, ok := runtime.Caller(i)
-                if !ok {
-                        break
-                }
-                if strings.Contains(file, "github.com/pborman/pty") {
-                        if f := runtime.FuncForPC(pc); f != nil {
-                                me = f.Name()
-                                me = me[strings.LastIndex(me, ".")+1:]
-                        }
-                }
-        }
+	var me string
+	for i := 1; i < 15; i++ {
+		pc, file, _, ok := runtime.Caller(i)
+		if !ok {
+			break
+		}
+		if strings.Contains(file, "github.com/pborman/pty") {
+			if f := runtime.FuncForPC(pc); f != nil {
+				me = f.Name()
+				me = me[strings.LastIndex(me, ".")+1:]
+			}
+		}
+	}
 	return me
 }
 

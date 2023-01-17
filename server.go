@@ -25,10 +25,7 @@ func shell(socket string, debug bool) {
 		os.Exit(0)
 	}()
 
-	conn, err := net.ListenUnix("unix", &net.UnixAddr{
-		Name: socket,
-		Net:  "unix",
-	})
+	conn, err := ListenSocket(socket)
 	if err != nil {
 		exitf("server: %v", err)
 	}
@@ -77,7 +74,7 @@ func attach(c net.Conn, s *Shell) {
 
 	ech := make(chan error, 1)
 	go func() {
-		defer func(){
+		defer func() {
 			log.Errorf("exiting from attach")
 			if p := recover(); p != nil {
 				log.Errorf("Panic: %v", p)
@@ -240,7 +237,7 @@ func runServer(session, debugFile string) {
 	}
 	cmd := exec.Command(os.Args[0], args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-                Setsid:  true,
+		Setsid: true,
 	}
 	if err := cmd.Start(); err != nil {
 		log.Errorf("rexec failed: %v", err)

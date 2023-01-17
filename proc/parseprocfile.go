@@ -28,8 +28,8 @@ import (
 // Numeric values can optionally have a scaling factor after the numeric
 // portion.  The known scaling factors are:
 //
-//    kB: multiply the value by 1024
-//    mB: multiply the value by 1024*1024
+//	kB: multiply the value by 1024
+//	mB: multiply the value by 1024*1024
 //
 // There are several tags that are understood by ParseProcFile and can be used
 // to alter the parsing of the value.
@@ -39,12 +39,12 @@ import (
 //
 // Example fields:
 //
-//    Field int     // a base 10 number
-//    Field uint    `base:"16"` // a base 16 unsigned number
-//    Field []int   `base:"16"` // a slice of base 16 numbers
-//    Field []int   `delim:"/"` // a slice of numbers deliminted by /
-//    Field string  // a string (trimmed)
-//    Field float32 // a 32 bit float
+//	Field int     // a base 10 number
+//	Field uint    `base:"16"` // a base 16 unsigned number
+//	Field []int   `base:"16"` // a slice of base 16 numbers
+//	Field []int   `delim:"/"` // a slice of numbers deliminted by /
+//	Field string  // a string (trimmed)
+//	Field float32 // a 32 bit float
 func ParseProcFile(f io.Reader, iv interface{}) error {
 	r := bufio.NewReader(f)
 	v := reflect.ValueOf(iv).Elem()

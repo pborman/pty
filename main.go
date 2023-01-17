@@ -5,11 +5,9 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,10 +25,10 @@ import (
 var (
 	ostate *terminal.State
 	tilde  = byte('P' & 0x1f)
+	copyFD int
 )
 
 func init() {
-	mutex.CheckStdin = checkStdin
 }
 
 var pprofFd *os.File
@@ -90,7 +88,6 @@ func main() {
 		runServer(*internal, *internalDebug)
 		return
 	}
-	checkStdin()
 
 	args := getopt.Args()
 	switch len(args) {
@@ -111,160 +108,90 @@ func main() {
 		exitf("invalid escape character: %q", *echar)
 	}
 
-	checkStdin()
 	var session string
 	var isNew bool
 	switch {
 	case *newSession != "":
-	checkStdin()
 		session = SessionPath(*newSession)
-	checkStdin()
 		if _, _, err := CheckSession(session); err == nil {
-	checkStdin()
 			exitf("session name already in use")
 		}
-	checkStdin()
 		isNew = true
-	checkStdin()
 	case len(args) == 0:
-	checkStdin()
 		session, isNew, err = SelectSession()
-	checkStdin()
 		switch err {
 		case nil:
-	checkStdin()
 		case io.EOF:
-	checkStdin()
 			exit(1)
 		default:
-	checkStdin()
 			exitf("selecting session: %v", err)
 		}
-	checkStdin()
 		if session == "" {
-	checkStdin()
 			exit(42)
 		}
 	case len(args) > 0:
-	checkStdin()
 		session = SessionPath(args[0])
-	checkStdin()
 		cnt, pid, err := CheckSession(session)
-	checkStdin()
 		if err != nil {
-	checkStdin()
 			exitf("no such session %s", args[0])
 		}
 		if cnt == 0 {
-	checkStdin()
 			break
 		}
-	checkStdin()
 		fmt.Print(ps)
-	checkStdin()
 		ok, err := readYesNo("Session has %d clients.\n%sContinue? [Y/n] ", cnt, PS(pid))
-	checkStdin()
 		if err != nil {
-	checkStdin()
 			exitf("reading: %v", err)
-	checkStdin()
 		}
-	checkStdin()
 		if !ok {
-	checkStdin()
 			return
 		}
 	}
 
-	checkStdin()
 	log.Init("C" + strings.TrimPrefix(filepath.Base(session), "session"))
-	checkStdin()
 	log.TakeStderr()
-	checkStdin()
 
 	if isNew {
-	checkStdin()
 		var debugFile string
-	checkStdin()
 		if *debugServer {
-	checkStdin()
 			debugFile = session + debugSuffix
-	checkStdin()
 		}
-	checkStdin()
-log.Infof("SPAWN NEW SERVER")
+		log.Infof("SPAWN NEW SERVER")
 		spawnServer(session, debugFile, *debugFlag)
-	checkStdin()
 		if *detach {
-	checkStdin()
 			return
-	checkStdin()
 		}
-	checkStdin()
 		// Give the new shell a chance to start up.
-	checkStdin()
-	checkStdin()
 	}
 
 	// Here on down is the pty client.
-	checkStdin()
-	checkStdin()
-	amClient = true // make checkStdin do something
-	checkStdin()
-
-	checkStdin()
-	c, err := net.DialUnix("unix", nil, &net.UnixAddr{
-		Name: session,
-		Net:  "unix",
-	})
-	checkStdin()
+	c, err := DialSocket(session)
 
 	if err != nil {
-	checkStdin()
 		exitf("dialing session: %v", err)
 	}
 
-	checkStdin()
 	defer exit(0) // main should not return, this is a failsafe
-	checkStdin()
 	myname, _ := ttyname.Fileno(0)
-	checkStdin()
 	if myname == "" {
 		myname = "unknown"
 	}
-	checkStdin()
 	displayMotd()
-	checkStdin()
-	checkStdin()
-	checkStdin()
 	ostate, err = terminal.MakeRaw(0)
-	checkStdin()
-	checkStdin()
 	if err != nil {
-	checkStdin()
 		exitf("stty: %v\n", err)
 	}
-	checkStdin()
 	if !isNew {
-	checkStdin()
 		fmt.Printf("Connected to session %s\r\n", SessionName(session))
 	}
-	checkStdin()
 	if tilde != 0 {
-	checkStdin()
 		fmt.Printf("Escape character is %s\r\n", printEscape(tilde))
 	}
-	checkStdin()
 
 	w := NewMessengerWriter(c)
-	checkStdin()
-	checkStdin()
 	ready := make(chan struct{})
-	checkStdin()
-	/*go*/ func() {
-	checkStdin()
+	go func() {
 		defer func() {
-	checkStdin()
 			log.Errorf("MessengerReader is done")
 			if p := recover(); p != nil {
 				log.Errorf("Panic: %v", p)
@@ -272,63 +199,42 @@ log.Infof("SPAWN NEW SERVER")
 				panic(p)
 			}
 		}()
-		checkStdin()
 		mr := NewMessengerReader(c, func(kind messageKind, data []byte) {
-			checkStdin()
 			clientCommand(w, kind, data, ready)
-			checkStdin()
 		})
-		checkStdin()
 		var buf [1024]byte
-		checkStdin()
 		var err error
-		checkStdin()
 		var n int
-		checkStdin()
 		for err == nil {
-			checkStdin()
 			n, err = mr.Read(buf[:])
-			checkStdin()
 			if n > 0 {
-				checkStdin()
 				if _, err := os.Stdout.Write(buf[:n]); err != nil {
 					log.Errorf("Writing to stdout: %v", err)
 				}
-				checkStdin()
 				// tee.Write(buf[:n])
-				checkStdin()
 			}
-			checkStdin()
 		}
-		checkStdin()
 		if err != nil && err != io.EOF {
 			exitf("client exit: %v", err)
 		}
 		exit(0)
 	}()
 
-	checkStdin()
 	// Below is the code that reads from stdin and writes to the server.
-		checkStdin()
 	watchSigwinch(w)
-		checkStdin()
 	w.Sendf(ttynameMessage, "%s", myname)
-		checkStdin()
 	var buf [32768]byte
 	state := 0
 	<-ready
 	ecnt := 0
-rcnt := 0
+	rcnt := 0
 	for {
-		checkStdin()
 		log.Infof("%d Reading from stdin", rcnt)
 		rcnt++
-		checkStdin()
 		n, rerr := os.Stdin.Read(buf[:])
 		if rerr != nil {
-			log.Infof("%v", err)
+			exitf("%v", err)
 		}
-		checkStdin()
 		if n == 0 {
 			log.Errorf("Stdin(%d) returned %v", os.Stdin.Fd(), rerr)
 			stdin, err := os.Open("/dev/stdin")
@@ -343,16 +249,12 @@ rcnt := 0
 				exitf(" after reopening: %v", rerr)
 			}
 		}
-		checkStdin()
 		log.Infof("Read %d", n)
-		checkStdin()
 		var cmd byte
 		if tilde != 0 {
-			checkStdin()
 		Loop:
 			// Look tilde followed by . or :
 			for _, c := range buf[:n] {
-				checkStdin()
 				switch state {
 				case 0:
 					switch c {
@@ -369,54 +271,40 @@ rcnt := 0
 						// we should probably strip one of the two tilde's.
 						n = 0
 						state = 0
-						checkStdin()
 						w.Write([]byte{tilde})
-						checkStdin()
 						break Loop
 					default:
 						state = 0
 					}
 				}
 			}
-			checkStdin()
 			if state >= 1 {
 				n -= state
 			}
 		}
-		checkStdin()
 		if n > 0 {
-			checkStdin()
 			_, err2 := w.Write(buf[:n])
-			checkStdin()
 			if err == nil {
 				err = err2
 			}
 		}
-		checkStdin()
 		if cmd != 0 {
 			log.Infof("request command %q", cmd)
 		}
-		checkStdin()
 		switch cmd {
 		case 0:
 			continue
 		case tilde:
-			checkStdin()
 			if _, err := os.Stdout.Write([]byte{tilde}); err != nil {
-log.Infof("%v", err)
+				log.Infof("%v", err)
 			}
-			checkStdin()
 		case '.':
-			checkStdin()
 			if _, err := os.Stdout.Write([]byte("\r\n")); err != nil {
-log.Infof("%v", err)
-	}
-			checkStdin()
+				log.Infof("%v", err)
+			}
 			exit(0)
 		case ':':
-			checkStdin()
 			terminal.Restore(0, ostate)
-			checkStdin()
 			fmt.Printf("\nCommand: ")
 			line, err := readline()
 			if err != nil {
@@ -430,15 +318,12 @@ log.Infof("%v", err)
 			if len(args) > 0 {
 				command(false, w, args...)
 			}
-			checkStdin()
 			ostate, err = terminal.MakeRaw(0)
-			checkStdin()
 			if err != nil {
 				exitf("stty: %v\n", err)
 			}
 			command(true, w, args...)
 		}
-		checkStdin()
 		log.Infof("finished command %q", cmd)
 		state = 0
 		if rerr != nil {
@@ -450,62 +335,12 @@ log.Infof("%v", err)
 		} else {
 			ecnt = 0
 		}
-		checkStdin()
 	}
 
 	if !strings.Contains(err.Error(), "broken pipe") {
 		exitf("%v", err)
 	}
 	exit(0)
-}
-
-var amClient = false
-var csMu sync.Mutex
-var csWhen = map[string]time.Time{}
-var csLine = map[string]string{}
-
-func checkStdin() {
-log.Outputf(2, "S", "Checking stdin")
-	if !amClient {
-		return
-	}
-	csMu.Lock()
-	now := time.Now()
-	var sb syscall.Stat_t
-
-	myLine := "????"
-	if _, file, line, ok := runtime.Caller(1); ok {
-		myLine = fmt.Sprintf("%s:%d", file, line)
-	}
-
-	me := log.Me()
-
-	if err := syscall.Fstat(0, &sb); err != nil {
-		oldWhen := csWhen[me]
-		oldLine := csLine[me]
-		log.Errorf("\nstdin failed %v between %v and %v (%v)\n%s Previous: %s\n%s Current : %s\n",
-			err,
-			oldWhen.Format("15:04:05.000"),
-			now.Format("15:04:05.000"),
-			now.Sub(oldWhen), me, oldLine, me, myLine)
-		fmt.Printf("\r\nstdin failed %v between %v and %v (%v)\r\n%s Previous: %s\r\n%s Current : %s\r\n",
-			err,
-			oldWhen.Format("15:04:05.000"),
-			now.Format("15:04:05.000"),
-			now.Sub(oldWhen), me,  oldLine, me, myLine)
-for k, v := range csLine {
-	if k != me {
-	fmt.Printf("other goroutine: %s: %s\r\n", k, v)
-	log.Errorf("other goroutine: %s: %s: %s\r\n", k, csWhen[k].Format("15:04:05.000"), v)
-	}
-}
-		log.DumpStack()
-		csMu.Unlock()
-		select {}
-	}
-	csLine[me] = myLine
-	csWhen[me] = now
-	csMu.Unlock()
 }
 
 var (
@@ -543,7 +378,6 @@ func ping(w *MessengerWriter) error {
 
 // clientCommand handles command recevied from the server.
 func clientCommand(w *MessengerWriter, kind messageKind, data []byte, ready chan struct{}) {
-	checkStdin()
 	log.Infof("Received command %v", kind)
 	switch kind {
 	case pingMessage:
@@ -562,9 +396,7 @@ func clientCommand(w *MessengerWriter, kind messageKind, data []byte, ready chan
 		}
 		delete(ackers, key)
 	case serverMessage:
-		checkStdin()
 		os.Stdout.Write(data)
-		checkStdin()
 	case countMessage:
 	case preemptMessage:
 		// We could warn the client
@@ -581,9 +413,7 @@ func clientCommand(w *MessengerWriter, kind messageKind, data []byte, ready chan
 			close(ready)
 		}
 	case primaryMessage:
-		checkStdin()
 		rows, cols, err := pty.Getsize(os.Stdin)
-		checkStdin()
 		if err == nil {
 			w.Send(ttysizeMessage, encodeSize(rows, cols))
 		}
@@ -625,19 +455,18 @@ var tee = teeer{
 }
 
 func (t *teeer) Write(buf []byte) (int, error) {
-return len(buf), nil // we are not using tee so we don't want mutex log messages
+	return len(buf), nil // we are not using tee so we don't want mutex log messages
 	unlock := t.mu.Lock("Write")
 	w := t.w
 	unlock()
 	if w == nil {
 		return len(buf), nil
 	}
-	checkStdin()
 	return w.Write(buf)
 }
 
 func (t *teeer) Open(path string) {
-log.Infof("Opening tee")
+	log.Infof("Opening tee")
 	if path == "-" {
 		unlock := t.mu.Lock("Open1")
 		if t.w != nil {
@@ -705,7 +534,6 @@ func command(raw bool, w *MessengerWriter, args ...string) {
 		if raw {
 			return
 		}
-		checkStdin()
 		os.Stdout.Write(ps(w))
 	case "excl":
 		if raw {
@@ -785,17 +613,13 @@ func command(raw bool, w *MessengerWriter, args ...string) {
 }
 
 func watchSigwinch(w *MessengerWriter) error {
-	return nil
-	checkStdin()
 	rows, cols, err := pty.Getsize(os.Stdin)
-	checkStdin()
 	if err == nil {
 		w.Send(ttysizeMessage, encodeSize(rows, cols))
 	}
 	if err != nil {
 		return nil
 	}
-panic("cannot get here")
 	go func() {
 		defer func() {
 			log.Errorf("watchSigwinch is done")
@@ -808,9 +632,7 @@ panic("cannot get here")
 		ch := make(chan os.Signal, 2)
 		signal.Notify(ch, syscall.SIGWINCH)
 		for range ch {
-			checkStdin()
 			rows, cols, err := pty.Getsize(os.Stdin)
-			checkStdin()
 			if err != nil {
 				log.Warnf("sigwinch getsize: %v", err)
 				fmt.Fprintf(os.Stderr, "getsize: %v\r\n", err)

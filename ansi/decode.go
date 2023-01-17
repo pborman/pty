@@ -20,13 +20,13 @@ const (
 // An S contains a decoded escape sequence.  There are several types of
 // escape sequences:
 //
-//   "C0"  - Single Control Set 0 character 0x00 - 0x1f
-//   "C1"  - Single Control Set 1 character ESC 0x40 - 0x5f / 0x80 - 0x9f
-//   "ICF" - Independent Control Function ESC 0x6f - 0x7e
-//   "ESC" - Other escape sequence
-//   "CSI" - Standard ANSI Escape Sequence ESC [ ...
-//   "CS"  - Control String
-//   ""    - String of regular text (no ESC or C1 characters)
+//	"C0"  - Single Control Set 0 character 0x00 - 0x1f
+//	"C1"  - Single Control Set 1 character ESC 0x40 - 0x5f / 0x80 - 0x9f
+//	"ICF" - Independent Control Function ESC 0x6f - 0x7e
+//	"ESC" - Other escape sequence
+//	"CSI" - Standard ANSI Escape Sequence ESC [ ...
+//	"CS"  - Control String
+//	""    - String of regular text (no ESC or C1 characters)
 //
 // CSI escape sequences may contain some number of parameters.  The parsed
 // parameters are provided in Parmas.  Control Strings, such as OSC, have the
