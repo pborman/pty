@@ -3,7 +3,6 @@ package mutex
 import (
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/pborman/pty/log"
 )
@@ -20,11 +19,7 @@ func New(msg string) *Mutex {
 	m := &Mutex{
 		msg: msg,
 	}
-	m.logf("created")
 	return m
-}
-
-func (m *Mutex) SetWait(d time.Duration) {
 }
 
 func (m *Mutex) logf(format string, args ...interface{}) {

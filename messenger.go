@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/pborman/pty/log"
 	"github.com/pborman/pty/mutex"
@@ -20,7 +19,6 @@ func NewMessengerWriter(w io.Writer) *MessengerWriter {
 		mu: mutex.New("NewMessengerWriter"),
 		w:  w,
 	}
-	m.mu.SetWait(time.Second * 15)
 	return m
 }
 
