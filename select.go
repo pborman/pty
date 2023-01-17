@@ -293,12 +293,11 @@ func DialSocket(socket string) (_ net.Conn, err error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("Dial %s\n", addr)
+	log.Infof("Dialing %s @ %v", socket, addr)
 	return net.DialTCP("tcp", nil, addr)
 }
 
 func CheckSession(socket string) (cnt, pid int, err error) {
-	log.Infof("Dialing %s", socket)
 	client, err := DialSocket(socket)
 	if err != nil {
 		log.Infof("Dialing %s %v", socket, err)
