@@ -33,4 +33,6 @@ Please select a session:
 ```
 This shows there is only one pty session available and it is editing the file interesting.go.  It is possible for multiple clients to be attached to a single pty session, though visual editing can become interesting.
 
+When connecting to an existing session the SSH_AUTH_SOCK environment variable will be incorrect.  Using ```<ctrl-p>:ssh``` at a shell prompt will send ```SSH_AUTH_SOCK=...``` as if you had typed it.  You can use the general ```setenv``` command to send other environment variables.
+
 pty keeps its log files in ```$HOME/.pty/log```.
