@@ -21,6 +21,7 @@ import (
 
 const (
 	prefix      = "session-"
+	titlePrefix = "title-"
 	debugSuffix = ".debug"
 	fwdSuffix   = ".forward"
 	rcdir       = ".pty"
@@ -93,7 +94,7 @@ func SelectSession() (name string, _ bool, err error) {
 	}
 	fmt.Printf("    0) Create a new session\n")
 	for i, si := range sessions {
-		fmt.Printf("    %d) %s (%d Client%s)\n", i+1, si.Name, si.Count, splur(si.Count))
+		fmt.Printf("    %d) %s (%d Client%s) %s\n", i+1, si.Name, si.Count, splur(si.Count), SessionTitle(si.Name))
 		if si.PS != "" {
 			for _, line := range strings.Split(si.PS, "\n") {
 				if line == "" {
@@ -246,6 +247,29 @@ func SessionName(socket string) string {
 
 func SessionPath(session string) string {
 	return filepath.Join(user.HomeDir, rcdir, prefix+session)
+}
+
+func SessionTitlePath(session string) string {
+	return filepath.Join(user.HomeDir, rcdir, titlePrefix+SessionName(session))
+}
+
+func SessionTitle(session string) string {
+	data, err := ioutil.ReadFile(SessionTitlePath(session))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "no title"
+		}
+		return fmt.Sprintf("error - %v", err)
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func SetSessionTitle(session string, title string) error {
+	path := SessionTitlePath(SessionName(session))
+	if err := ioutil.WriteFile(path, ([]byte)(title), 0600); err != nil {
+		return err
+	}
+	return nil
 }
 
 func ListenSocket(socket string) (net.Listener, error) {

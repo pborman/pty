@@ -283,13 +283,13 @@ func main() {
 				fmt.Printf("%v\n", err)
 			}
 			if len(args) > 0 {
-				command(false, w, args...)
+				command(false, session, w, args...)
 			}
 			ostate, err = terminal.MakeRaw(0)
 			if err != nil {
 				exitf("stty: %v\n", err)
 			}
-			command(true, w, args...)
+			command(true, session, w, args...)
 		}
 
 		state = 0
@@ -466,7 +466,7 @@ func (t *teeer) Open(path string) {
 	unlock()
 }
 
-func command(raw bool, w *MessengerWriter, args ...string) {
+func command(raw bool, session string, w *MessengerWriter, args ...string) {
 	if len(args) == 0 {
 		return
 	}
@@ -477,14 +477,23 @@ func command(raw bool, w *MessengerWriter, args ...string) {
 		}
 		fmt.Printf("Commands:\n")
 		fmt.Printf("  dump   - dump stack\n")
-		fmt.Printf("  excl   - detach all other clients\n")
 		fmt.Printf("  env    - display environment variables\n")
+		fmt.Printf("  excl   - detach all other clients\n")
 		fmt.Printf("  list   - list all clients\n")
+		fmt.Printf("  ps     - display processes on this pty\n")
 		fmt.Printf("  save   - save buffer to FILE\n")
 		fmt.Printf("  setenv - forward environtment variables\n")
 		fmt.Printf("  ssh    - forward SSH_AUTH_SOCK\n")
 		fmt.Printf("  tee    - tee all future output to FILE (- to close)\n")
-		fmt.Printf("  ps     - display processes on this pty\n")
+		fmt.Printf("  title  - set the title for this session\n")
+	case "title":
+		if raw {
+			return
+		}
+		if len(args) > 1 {
+			SetSessionTitle(session, strings.Join(args[1:], " "))
+		}
+		fmt.Printf("%s: %s\n", SessionName(session), SessionTitle(session))
 	case "dump":
 		if raw {
 			w.Send(dumpMessage, nil)

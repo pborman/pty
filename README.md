@@ -7,14 +7,15 @@ Typical invocation: ```ssh -t remotehost path-to-pty```
 pty is a ```screen``` like program for managing sessions on a remote machine.  It uses ```<ctrl-p>``` as the escape character. ```<ctrl-p>.``` is used to disconnect.  Use ```<ctrl-p>:``` to execute a pty command.  The commands are:
 ```
   dump   - dump stack
-  excl   - detach all other clients
   env    - display environment variables
+  excl   - detach all other clients
   list   - list all clients
+  ps     - display processes on this pty
   save   - save buffer to FILE
   setenv - forward environment variables
   ssh    - forward SSH_AUTH_SOCK
   tee    - tee all future output to FILE (- to close)
-  ps     - display processes on this pty
+  title  - display/set session title
 ```
 pty is both a client and server.  The first time pty is called (or anytime when there are no sessions) it will ask for a session:
 ```
