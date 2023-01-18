@@ -394,6 +394,7 @@ func (s *Shell) Exit() {
 		}
 		checkClose(c)
 	}
+	exit(0)
 }
 
 func (s *Shell) List(me *Client) {
