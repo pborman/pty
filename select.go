@@ -127,14 +127,6 @@ Loop:
 			
 		}
 		if n, err := strconv.Atoi(name); err == nil {
-			if n == -1 && loginShell != "" {
-				execsh()
-			}
-			if n == 0 {
-				fmt.Printf("Name of session to create: ")
-				name, err = readline()
-				return name, name != "", err
-			}
 			if n >= 1 && n <= len(sessions) {
 				return sessions[n-1].Name, false, nil
 			}
