@@ -90,9 +90,9 @@ func SelectSession() (name string, _ bool, err error) {
 	}
 	fmt.Printf("Current sessions:\n")
 	if loginShell != "" {
-		fmt.Printf("   -1) Spawn %s\n", loginShell)
+		fmt.Printf("   sh) Spawn %s\n", loginShell)
 	}
-	fmt.Printf("    0) Create a new session\n")
+	fmt.Printf(" name) Create a new session named name\n")
 	for i, si := range sessions {
 		fmt.Printf("    %d) %s (%d Client%s) %s\n", i+1, si.Name, si.Count, splur(si.Count), SessionTitle(si.Name))
 		if si.PS != "" {
@@ -117,6 +117,14 @@ Loop:
 		name = strings.TrimSpace(name)
 		if name == "" {
 			return "", false, nil
+		}
+		if name == "sh" {
+			if loginShell == "" {
+				exitf("$SHELL not set.")
+			}
+			execsh()
+			exitf("failed to exec %v", loginShell)
+			
 		}
 		if n, err := strconv.Atoi(name); err == nil {
 			if n == -1 && loginShell != "" {
