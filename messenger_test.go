@@ -17,7 +17,7 @@ func TestMessengerWriter(t *testing.T) {
 	_ = bigstring
 
 	type mbuf struct {
-		kind int
+		kind messageKind
 		msg  string
 	}
 
@@ -121,7 +121,7 @@ func TestMessengerWriter(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("got raw/want raw:\n%.32q\n%.32q", got, tt.want)
 			}
-			mr := NewMessengerReader(&buf, func(kind int, data []byte) {})
+			mr := NewMessengerReader(&buf, func(kind messageKind, data []byte) {})
 			data, err := ioutil.ReadAll(mr)
 			if err != nil {
 				t.Errorf("read error:%v", err)
