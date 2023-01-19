@@ -322,29 +322,49 @@ func DialSocket(socket string) (_ net.Conn, err error) {
 }
 
 func CheckSession(socket string) (cnt, pid int, err error) {
+	msg, err := SessionCmd(socket, askCountMessage, countMessage)
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(msg) == 1 {
+		return int(msg[0]), 0, nil
+	}
+	x := bytes.IndexByte(msg, ':')
+	if x < 0 {
+		return 0, 0, nil
+	}
+	cnt, err = strconv.Atoi(string(msg[:x]))
+	pid, perr := strconv.Atoi(string(msg[x+1:]))
+	if err == nil {
+		err = perr
+	}
+	return cnt, pid, err
+}
+
+func SessionCmd(socket string, req, resp messageKind) (msg []byte, err error) {
 	client, err := DialSocket(socket)
 	if err != nil {
 		log.Infof("Dialing %s %v", socket, err)
 		os.Remove(socket)
 		if strings.Contains(err.Error(), "connect: connection refused") {
-			return 0, 0, removedErr
+			return nil, removedErr
 		}
-		return 0, 0, err
+		return nil, err
 	}
 	defer func() {
 		checkClose(client)
 	}()
 
 	w := NewMessengerWriter(client)
-	w.Sendf(askCountMessage, "")
-	ch := make(chan string, 2)
+	w.Sendf(req, "")
+	ch := make(chan []byte, 2)
 
 	r := NewMessengerReader(client, func(kind messageKind, data []byte) {
 		switch kind {
 		case startMessage:
-			w.Sendf(askCountMessage, "")
-		case countMessage:
-			ch <- string(data)
+			w.Sendf(req, "")
+		case resp:
+			ch <- data
 		}
 	})
 
@@ -360,20 +380,8 @@ func CheckSession(socket string) (cnt, pid int, err error) {
 	}()
 	select {
 	case <-time.After(time.Second * 5):
-		return 0, 0, fmt.Errorf("%s timed out", socket)
+		return nil, fmt.Errorf("%s timed out", socket)
 	case msg := <-ch:
-		if len(msg) == 1 {
-			return int(msg[0]), 0, nil
-		}
-		x := strings.Index(msg, ":")
-		if x < 0 {
-			return 0, 0, nil
-		}
-		cnt, err := strconv.Atoi(msg[:x])
-		pid, perr := strconv.Atoi(msg[x+1:])
-		if err == nil {
-			err = perr
-		}
-		return cnt, pid, err
+		return msg, nil
 	}
 }
