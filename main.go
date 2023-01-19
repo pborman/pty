@@ -129,8 +129,7 @@ func main() {
 		if cnt == 0 {
 			break
 		}
-		fmt.Print(ps)
-		ok, err := readYesNo("Session has %d clients.\n%sContinue? [Y/n] ", cnt, PS(pid))
+		ok, err := readYesNo("Session has %d client%s.\n%sContinue? [Y/n] ", cnt, splur(cnt), PS(pid))
 		if err != nil {
 			exitf("reading: %v", err)
 		}
