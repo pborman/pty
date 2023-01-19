@@ -23,7 +23,7 @@ import (
 	"strings"
 
 	"github.com/pborman/pty/ansi"
-	"github.com/pborman/pty/ansi/xterm"
+	"github.com/pborman/pty/xterm"
 )
 
 func init() {
