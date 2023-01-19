@@ -68,7 +68,7 @@ func (m *MessengerWriter) Send(kind messageKind, buf []byte) (int, error) {
 	}
 	defer m.mu.Lock("Send")()
 
-	// We copy up to 1k into the buffer than includes are header.
+	// We copy up to 1k into the buffer than includes our header.
 	// If buf is longer than that, we do a second write.  This is
 	// as opposed doing a 6 byte write always followed by a second
 	// write.
