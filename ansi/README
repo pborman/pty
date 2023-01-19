@@ -1,0 +1,4 @@
+This package should not be needed.  Instead, github.com/pborman/ansi
+should be used.  However, this version of the package seems to be newer
+than github.com/pborman/ansi.  I would update that one but I am not
+sure if it would break any existing code.
