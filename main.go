@@ -77,7 +77,7 @@ func main() {
 		sis := GetSessions()
 		fmt.Printf("Found %d sessions:\n", len(sis))
 		for _, si := range sis {
-			fmt.Printf("  %s (%d)\n", si.Name, si.Count)
+			fmt.Printf("  %s (%d) %s\n", si.Name, si.Count, si.Title)
 		}
 		return
 	}
@@ -219,7 +219,7 @@ func main() {
 
 	// Below is the code that reads from stdin and writes to the server.
 	watchSigwinch(w)
-	w.Sendf(ttynameMessage, "%s", myname)
+	w.Sendf(ttynameMessage, "%d:%s", os.Getpid(), myname)
 	var buf [32768]byte
 	state := 0
 	<-ready

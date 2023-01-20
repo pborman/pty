@@ -155,6 +155,7 @@ type Shell struct {
 	wg         sync.WaitGroup
 	mu         *mutex.Mutex
 	clients    map[*Client]struct{}
+	pids       map[int]*Client
 	eb         *EscapeBuffer
 	scr        *Screen
 	exiting    bool
@@ -170,6 +171,7 @@ func NewShell(socket string) *Shell {
 		started: make(chan struct{}),
 		done:    make(chan struct{}),
 		clients: map[*Client]struct{}{},
+		pids:    map[int]*Client{},
 		Shell:   LoginShell,
 		Args:    []string{"-" + path.Base(LoginShell)},
 		Env:     os.Environ(),
@@ -201,6 +203,23 @@ func NewShell(socket string) *Shell {
 		return false
 	})
 	return s
+}
+
+// AddPid adds pid to the list of client pids.
+func (s *Shell) AddPid(client *Client, pid int) {
+	defer s.mu.Lock("AddPid")()
+	s.pids[pid] = client
+}
+
+func (s *Shell) Count() int {
+	defer s.mu.Lock("Count")()
+	for pid, client := range s.pids {
+		if syscall.Kill(pid, 0) != nil {
+			delete(s.pids, pid)
+			s.Detach(client)
+		}
+	}
+	return len(s.pids)
 }
 
 // Setenv replaces or adds the specified key value pair to the shell's
@@ -268,8 +287,10 @@ func (s *Shell) Take(c *Client, requestSize bool) {
 func (s *Shell) Detach(c *Client) {
 	log.Infof("detach client %s", c.Name())
 	defer s.mu.Lock("Detach")()
-	delete(s.clients, c)
-	// s.wg.Done()
+	if _, ok := s.clients[c]; ok {
+		delete(s.clients, c)
+		s.wg.Done()
+	}
 }
 
 func (s *Shell) Write(buf []byte) (int, error) {
@@ -309,8 +330,7 @@ func (s *Shell) runout() {
 				for c := range s.clients {
 					if !c.Output(nbuf) {
 						log.Infof("write to client %s failed", c.Name())
-						delete(s.clients, c)
-						s.wg.Done()
+						s.Detach(c)
 					}
 				}
 			}
@@ -318,16 +338,16 @@ func (s *Shell) runout() {
 				log.Infof("deleting all clients")
 				for c := range s.clients {
 					c := c
-					delete(s.clients, c)
+					s.Detach(c)
 					go func() {
 						checkClose(c)
-						s.wg.Done()
 					}()
 				}
 				unlock()
 				s.wg.Wait()
 				unlock = s.mu.Lock("runout2")
 				close(s.done)
+				unlock()
 				return true
 			}
 			return false
@@ -343,6 +363,7 @@ func (s *Shell) runout() {
 
 func (s *Shell) Start(debug bool) error {
 	s.Setenv("_PTY_SHELL", "true")
+	s.Setenv("_PTY_SOCKET", s.socket)
 	if s.pty != nil {
 		return errors.New("shell already started")
 	}
@@ -397,12 +418,16 @@ func (s *Shell) Start(debug bool) error {
 }
 
 func (s *Shell) Exit() {
-	defer s.mu.Lock("Exit")()
+	unlock := s.mu.Lock("Exit")
 	if s.exiting {
+		unlock()
 		return
 	}
 	s.exiting = true
-	for c := range s.clients {
+	clients := s.clients
+	unlock()
+	for c := range clients {
+		// Perhaps this should be locked.
 		if s.eb.inalt {
 			c.Output([]byte(nsbrc))
 		}

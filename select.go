@@ -36,6 +36,7 @@ import (
 const (
 	prefix      = "session-"
 	titlePrefix = "title-"
+	pidPrefix = "pid-"
 	debugSuffix = ".debug"
 	fwdSuffix   = ".forward"
 	rcdir       = ".pty"
@@ -108,7 +109,7 @@ func SelectSession() (name string, _ bool, err error) {
 	}
 	fmt.Printf(" name) Create a new session named name\n")
 	for i, si := range sessions {
-		fmt.Printf("    %d) %s (%d Client%s) %s\n", i+1, si.Name, si.Count, splur(si.Count), SessionTitle(si.Name))
+		fmt.Printf("    %d) %s (%d Client%s) %s\n", i+1, si.Name, si.Count, splur(si.Count), si.Title)
 		if si.PS != "" {
 			for _, line := range strings.Split(si.PS, "\n") {
 				if line == "" {
@@ -200,6 +201,7 @@ type SessionInfo struct {
 	Count int
 	Name  string
 	PS    string
+	Title string
 }
 
 func GetSessions() []SessionInfo {
@@ -230,14 +232,19 @@ func GetSessions() []SessionInfo {
 		go func() {
 			defer wg.Done()
 			cnt, pid, err := CheckSession(path)
+			tpath := strings.Replace(path, prefix, titlePrefix, 1)
+			title := ""
+			if data, err := ioutil.ReadFile(tpath); err == nil {
+				title = strings.TrimSpace(string(data))
+			}
 			switch {
 			case err == removedErr:
 			case err != nil:
 				fmt.Println(err)
 			case pid == 0:
-				ch <- SessionInfo{cnt, name[len(prefix):], ""}
+				ch <- SessionInfo{cnt, name[len(prefix):], "", title}
 			default:
-				ch <- SessionInfo{cnt, name[len(prefix):], PS(pid)}
+				ch <- SessionInfo{cnt, name[len(prefix):], PS(pid), title}
 			}
 		}()
 	}
@@ -267,6 +274,16 @@ func SessionTitlePath(session string) string {
 	return filepath.Join(user.HomeDir, rcdir, titlePrefix+SessionName(session))
 }
 
+func SessionPidPath(session string) string {
+	return filepath.Join(user.HomeDir, rcdir, pidPrefix+SessionName(session))
+}
+
+func RemoveSession(socket string) {
+	os.Remove(socket)
+	os.Remove(SessionTitlePath(socket))
+	os.Remove(SessionPidPath(socket))
+}
+
 func SessionTitle(session string) string {
 	data, err := ioutil.ReadFile(SessionTitlePath(session))
 	if err != nil {
@@ -294,21 +311,30 @@ func ListenSocket(socket string) (net.Listener, error) {
 	if err != nil {
 		exitf("server: %v", err)
 	}
-	os.Remove(socket)
+	RemoveSession(socket)
 	fd, err := os.Create(socket)
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
 	if _, err := fmt.Fprintf(fd, "%s", conn.Addr()); err != nil {
-		os.Remove(socket)
+		RemoveSession(socket)
 		conn.Close()
 		return nil, err
 	}
 	if err := fd.Close(); err != nil {
-		os.Remove(socket)
+		RemoveSession(socket)
 		conn.Close()
 		return nil, err
+	}
+	fd, err = os.Create(SessionPidPath(socket))
+	if err == nil {
+		if _, err := fmt.Fprintf(fd, "%d", os.Getpid()); err != nil {
+			log.Infof("writing pid: %v", err)
+		}
+		fd.Close()
+	} else {
+		log.Infof("opening pid: %v", err)
 	}
 	return conn, nil
 
@@ -335,7 +361,21 @@ func DialSocket(socket string) (_ net.Conn, err error) {
 	return net.DialTCP("tcp", nil, addr)
 }
 
+func SessionPid(socket string) (int, error) {
+	data, err := ioutil.ReadFile(SessionPidPath(socket))
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(string(data))
+}
+
 func CheckSession(socket string) (cnt, pid int, err error) {
+	if pid, err := SessionPid(socket); err != nil {
+		if syscall.Kill(pid, 0) != nil {
+			RemoveSession(socket)
+			return 0, 0, nil
+		}
+	}
 	msg, err := SessionCmd(socket, askCountMessage, countMessage)
 	if err != nil {
 		return 0, 0, err
@@ -359,7 +399,7 @@ func SessionCmd(socket string, req, resp messageKind) (msg []byte, err error) {
 	client, err := DialSocket(socket)
 	if err != nil {
 		log.Infof("Dialing %s %v", socket, err)
-		os.Remove(socket)
+		RemoveSession(socket)
 		if strings.Contains(err.Error(), "connect: connection refused") {
 			return nil, removedErr
 		}

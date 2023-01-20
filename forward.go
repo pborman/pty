@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"sync"
 
 	"github.com/pborman/pty/log"
@@ -49,7 +48,7 @@ func SetForwarder(name, remote string) error {
 }
 
 func NewForwarder(name, socket string) error {
-	os.Remove(socket)
+	RemoveSession(socket)
 	conn, err := ListenSocket(socket)
 	if err != nil {
 		return err

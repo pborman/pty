@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -114,7 +115,25 @@ func attach(c net.Conn, s *Shell) {
 			case pingMessage:
 				mw.Send(ackMessage, msg)
 			case ttynameMessage:
-				client.SetName(string(msg))
+				// the ttynameMessage is sent by each client as
+				// it attaches, excluding clients that are just
+				// asking for information (e.g., pty --list).
+				// The message includes the PID of the actual
+				// client.
+				var pid int
+				name := string(msg)
+				if x := strings.Index(name, ":"); x > 0 {
+					var err error
+					pid, err = strconv.Atoi(name[:x])
+					if err == nil {
+						s.AddPid(client, pid)
+						name = name[x+1:]
+					}
+				}
+				if pid == 0 {
+					log.Warnf("ttyname with no pid: %s", name)
+				}
+				client.SetName(name)
 			case dumpMessage:
 				log.DumpGoroutines()
 			case listMessage:
@@ -126,12 +145,14 @@ func attach(c net.Conn, s *Shell) {
 					return
 				}
 				rows, cols := decodeSize(msg)
-				defer s.mu.Lock("ttysizeMessage")()
+				unlock := s.mu.Lock("ttysizeMessage")
 				if rows == s.rows && cols == s.cols {
+					unlock()
 					return
 				}
 				s.rows = rows
 				s.cols = cols
+				unlock()
 				if err := s.Setsize(rows, cols); err != nil {
 					mw.Sendf(serverMessage, "ERROR: SETSIZE: %v\r\n", err)
 				}
