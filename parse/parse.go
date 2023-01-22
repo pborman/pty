@@ -103,7 +103,6 @@ func (r *Reader) matchQuote(word *bytes.Buffer, quote rune) error {
 			os.Stdout.Write([]byte(r.PS2))
 		}
 	}
-	panic("unreachable")
 }
 
 func (r *Reader) readWord() (string, rune, error) {
@@ -199,7 +198,6 @@ func (r *Reader) Read() (words []string, err error) {
 			words = append(words, string(delim))
 		}
 	}
-	panic("unreachable")
 }
 
 /*
