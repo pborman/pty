@@ -64,13 +64,13 @@ func (s *Session) shell(debug bool) {
 		}
 		log.Infof("accepted new connection")
 		go func() {
-			attach(c, shell)
+			shell.attach(c)
 			checkClose(c)
 		}()
 	}
 }
 
-func attach(c net.Conn, s *Shell) {
+func (s *Shell) attach(c net.Conn) {
 	// Attach forwards the shells output to c.
 	mw := NewMessengerWriter(c)
 	client := NewClient(mw)
