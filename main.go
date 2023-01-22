@@ -506,6 +506,9 @@ func command(raw bool, session *Session, w *MessengerWriter, args ...string) {
 		if raw {
 			return
 		}
+		if len(args) > 1 {
+			session.SetTitle(strings.Join(args[1:], " "))
+		}
 		fmt.Printf("%s: %s\n", session.Name, session.Title())
 	case "dump":
 		if raw {
