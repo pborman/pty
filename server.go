@@ -29,20 +29,20 @@ import (
 	"github.com/pborman/pty/log"
 )
 
-func shell(socket string, debug bool) {
-	s := NewShell(socket)
-	if err := s.Start(debug); err != nil {
-		exitf("start: %v\n", err)
-	}
-	go func() {
-		s.Wait()
-		os.Exit(0)
-	}()
-
-	conn, err := ListenSocket(socket)
+func (s *Session) shell(debug bool) {
+	conn, err := s.Listen()
 	if err != nil {
 		exitf("server: %v", err)
 	}
+
+	shell := NewShell(s)
+	if err := shell.Start(debug); err != nil {
+		exitf("start: %v\n", err)
+	}
+	go func() {
+		shell.Wait()
+		os.Exit(0)
+	}()
 
 	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, syscall.SIGABRT, syscall.SIGBUS, syscall.SIGQUIT, syscall.SIGSEGV)
@@ -64,7 +64,7 @@ func shell(socket string, debug bool) {
 		}
 		log.Infof("accepted new connection")
 		go func() {
-			attach(c, s)
+			attach(c, shell)
 			checkClose(c)
 		}()
 	}
@@ -74,7 +74,7 @@ func attach(c net.Conn, s *Shell) {
 	// Attach forwards the shells output to c.
 	mw := NewMessengerWriter(c)
 	client := NewClient(mw)
-	cnt := s.Attach(client)
+	s.Attach(client)
 	defer func() { go s.Detach(client) }()
 
 	ech := make(chan error, 1)
@@ -111,7 +111,7 @@ func attach(c net.Conn, s *Shell) {
 					checkClose(oc)
 				}
 			case askCountMessage:
-				mw.Sendf(countMessage, "%d:%d", cnt, os.Getpid())
+				mw.Sendf(countMessage, "%d", s.Count())
 			case pingMessage:
 				mw.Send(ackMessage, msg)
 			case ttynameMessage:
@@ -208,18 +208,22 @@ func attach(c net.Conn, s *Shell) {
 	checkClose(c)
 }
 
-// spawnServer spawns a server process.
-func spawnServer(session, debugFile string, foreground bool) {
+// spawnServer spawns a server process.  When we come back we will end up
+// s.run().
+func (s *Session) Spawn(debugFile string, foreground bool) {
+	if s.Check() {
+		exitf("Session %q already exists", s.Name)
+	}
 	if foreground {
-		runServer(session, debugFile)
+		s.run(debugFile)
 		return
 	}
 	// We prepend session with a "+" to indicate we
 	// want our child to fork another child and then
 	// exit.
-	args := []string{"--internal", "+" + session}
+	args := []string{"--internal", "+" + s.Name}
 	if debugFile != "" {
-		args = append(args, "--internal_debug", session+debugSuffix)
+		args = append(args, "--internal_debug", s.Name+debugSuffix)
 	}
 
 	cmd := exec.Command(os.Args[0], args...)
@@ -228,7 +232,8 @@ func spawnServer(session, debugFile string, foreground bool) {
 	if err := cmd.Start(); err != nil {
 		exitf("starting subprocess: %v", err)
 	}
-	fmt.Printf("Started session %s\n", SessionName(session))
+	fmt.Printf("Started session %s\n", s.Name)
+	s.started = true
 	go func() {
 		err := cmd.Wait()
 		if err != nil {
@@ -237,25 +242,25 @@ func spawnServer(session, debugFile string, foreground bool) {
 	}()
 }
 
-func runServer(session, debugFile string) {
-	if session[0] != '+' {
+func (s *Session) run(debugFile string) {
+	if s.spawn {
+		args := []string{"--internal", s.Name}
 		if debugFile != "" {
-			debugInit(debugFile)
+			args = append(args, "--internal_debug", debugFile)
 		}
-		shell(session, false)
+		cmd := exec.Command(os.Args[0], args...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Setsid: true,
+		}
+		if err := cmd.Start(); err != nil {
+			log.Errorf("rexec failed: %v", err)
+			exitf("rexec failed: %v\n", err)
+		}
 		return
 	}
-
-	args := []string{"--internal", session[1:]}
 	if debugFile != "" {
-		args = append(args, "--internal_debug", debugFile)
+		debugInit(debugFile)
 	}
-	cmd := exec.Command(os.Args[0], args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
-	}
-	if err := cmd.Start(); err != nil {
-		log.Errorf("rexec failed: %v", err)
-		exitf("rexec failed: %v\n", err)
-	}
+	s.shell(false)
+	return
 }

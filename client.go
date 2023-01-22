@@ -40,6 +40,7 @@ type Client struct {
 	quit    chan struct{}
 	out     io.Writer
 	primary bool
+	pid     int
 }
 
 // NewClient returns a freshly initialized client that writes output to out.
@@ -157,6 +158,19 @@ func (c *Client) nextBuf() mBuffer {
 
 func (c *Client) Name() string {
 	return c.name
+}
+
+func (c *Client) IsActive() bool {
+	defer c.mu.Lock("IsActive")()
+	// The pid is only set once the client has sent us a ttynameMessage.
+	// Clients that are just requesting information do not send a
+	// ttynameMessage.
+	return c.pid != 0
+}
+
+func (c *Client) SetPid(pid int) {
+	defer c.mu.Lock("SetPid")()
+	c.pid = pid
 }
 
 func (c *Client) SetName(name string) {

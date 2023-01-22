@@ -77,7 +77,7 @@ func main() {
 		sis := GetSessions()
 		fmt.Printf("Found %d sessions:\n", len(sis))
 		for _, si := range sis {
-			fmt.Printf("  %s (%d) %s\n", si.Name, si.Count, si.Title)
+			fmt.Printf("  %s (%d) %s\n", si.Name, si.cnt, si.Title())
 		}
 		return
 	}
@@ -88,9 +88,10 @@ func main() {
 
 	// If internal is set then we are being called from spawSession.
 	if *internal != "" {
-		log.Init("S" + strings.TrimPrefix(filepath.Base(*internal), "session"))
+		session := MakeSession(*internal)
+		log.Init("S-" + strings.TrimPrefix(filepath.Base(*internal), "session"))
 		log.TakeStderr()
-		runServer(*internal, *internalDebug)
+		session.run(*internalDebug)
 		return
 	}
 
@@ -113,17 +114,15 @@ func main() {
 		exitf("invalid escape character: %q", *echar)
 	}
 
-	var session string
-	var isNew bool
+	var session *Session
 	switch {
 	case *newSession != "":
-		session = SessionPath(*newSession)
-		if _, _, err := CheckSession(session); err == nil {
+		session = MakeSession(*newSession)
+		if session.Check() {
 			exitf("session name already in use")
 		}
-		isNew = true
 	case len(args) == 0:
-		session, isNew, err = SelectSession()
+		session, err = SelectSession()
 		switch err {
 		case nil:
 		case io.EOF:
@@ -131,19 +130,22 @@ func main() {
 		default:
 			exitf("selecting session: %v", err)
 		}
-		if session == "" {
+		if session == nil {
 			exit(42)
 		}
 	case len(args) > 0:
-		session = SessionPath(args[0])
-		cnt, pid, err := CheckSession(session)
-		if err != nil {
+		if !ValidSessionName(args[0]) {
+			exitf("invalid session name %q", args[0])
+		}
+		session = MakeSession(args[0])
+		
+		if !session.Check() {
 			exitf("no such session %s", args[0])
 		}
-		if cnt == 0 {
+		if session.cnt == 0 {
 			break
 		}
-		ok, err := readYesNo("Session has %d client%s.\n%sContinue? [Y/n] ", cnt, splur(cnt), PS(pid))
+		ok, err := readYesNo("Session has %d client%s.\nContinue? [Y/n] ", session.cnt, splur(session.cnt))
 		if err != nil {
 			exitf("reading: %v", err)
 		}
@@ -152,24 +154,25 @@ func main() {
 		}
 	}
 
-	log.Init("C" + strings.TrimPrefix(filepath.Base(session), "session"))
+	log.Init("C-" + strings.TrimPrefix(session.Name, "session"))
 	log.TakeStderr()
 
-	if isNew {
+	if !session.Ping() {
 		var debugFile string
 		if *debugServer {
-			debugFile = session + debugSuffix
+			debugFile = session.DebugPath()
 		}
 
-		spawnServer(session, debugFile, *debugFlag)
+		session.Spawn(debugFile, *debugFlag)
 		if *detach {
 			return
 		}
 		// Give the new shell a chance to start up.
+		time.Sleep(time.Second / 2)
 	}
 
 	// Here on down is the pty client.
-	c, err := DialSocket(session)
+	c, err := session.Dial()
 
 	if err != nil {
 		exitf("dialing session: %v", err)
@@ -185,8 +188,8 @@ func main() {
 	if err != nil {
 		exitf("stty: %v\n", err)
 	}
-	if !isNew {
-		fmt.Printf("Connected to session %s\r\n", SessionName(session))
+	if !session.started {
+		fmt.Printf("Connected to session %s\r\n", session.Name)
 	}
 	if tilde != 0 {
 		fmt.Printf("Escape character is %s\r\n", printEscape(tilde))
@@ -479,7 +482,7 @@ func (t *teeer) Open(path string) {
 	unlock()
 }
 
-func command(raw bool, session string, w *MessengerWriter, args ...string) {
+func command(raw bool, session *Session, w *MessengerWriter, args ...string) {
 	if len(args) == 0 {
 		return
 	}
@@ -503,10 +506,7 @@ func command(raw bool, session string, w *MessengerWriter, args ...string) {
 		if raw {
 			return
 		}
-		if len(args) > 1 {
-			SetSessionTitle(session, strings.Join(args[1:], " "))
-		}
-		fmt.Printf("%s: %s\n", SessionName(session), SessionTitle(session))
+		fmt.Printf("%s: %s\n", session.Name, session.Title())
 	case "dump":
 		if raw {
 			w.Send(dumpMessage, nil)

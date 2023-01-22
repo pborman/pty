@@ -26,6 +26,8 @@ type Mutex struct {
 	mu  sync.Mutex
 }
 
+const debug = true
+
 type waiter *int
 
 // New returns a new named mutex.
@@ -37,15 +39,21 @@ func New(msg string) *Mutex {
 }
 
 func (m *Mutex) logf(format string, args ...interface{}) {
+	if !debug {
+		return
+	}
 	format = fmt.Sprintf("%p:%s: %s", m, m.msg, format)
 	log.Outputf(3, "M", format, args...)
 }
 
 // Lock locks a mutex and returns the function to unlock the mutex.
 func (m *Mutex) Lock(msg string) func() {
+	m.logf("%s waiting for mutex\n", msg)
 	m.mu.Lock()
+	m.logf("%s acquired\n", msg)
 
 	return func() {
+		m.logf("%s releasing for mutex\n", msg)
 		m.mu.Unlock()
 	}
 }

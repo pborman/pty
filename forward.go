@@ -27,7 +27,7 @@ import (
 type forwarder struct {
 	lconn  net.Listener
 	mu     *mutex.Mutex
-	remote string
+	remote *Session
 }
 
 var (
@@ -43,13 +43,14 @@ func SetForwarder(name, remote string) error {
 		return fmt.Errorf("no such socket: %s", name)
 	}
 	defer f.mu.Lock("SetForwarder")()
-	f.remote = remote
+	f.remote = MakeSession(remote)
 	return nil
 }
 
 func NewForwarder(name, socket string) error {
-	RemoveSession(socket)
-	conn, err := ListenSocket(socket)
+	s := MakeSession(socket)
+	s.Remove()
+	conn, err := s.Listen()
 	if err != nil {
 		return err
 	}
@@ -82,12 +83,8 @@ func (f *forwarder) server() {
 	}
 }
 
-func (f *forwarder) session(c net.Conn, remote string) error {
-	if remote == "" {
-		return fmt.Errorf("empty remote name")
-	}
-
-	rc, err := DialSocket(remote)
+func (f *forwarder) session(c net.Conn, s *Session) error {
+	rc, err := s.Dial()
 	if err != nil {
 		return err
 	}

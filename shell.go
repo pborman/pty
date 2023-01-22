@@ -149,7 +149,7 @@ type Shell struct {
 	Env        []string
 	cmd        *exec.Cmd
 	pty        *os.File
-	socket     string
+	session    *Session
 	started    chan struct{}
 	done       chan struct{}
 	wg         sync.WaitGroup
@@ -165,9 +165,9 @@ type Shell struct {
 // NewShell returns a newly initialized, but not started, Shell.  By default,
 // Shell.Shell is set to LoginShell and Args is set to the basename of the
 // LoginShell with a "-" prepended (to indicate it is a login shell).
-func NewShell(socket string) *Shell {
+func NewShell(session *Session) *Shell {
 	s := &Shell{
-		mu:      mutex.New("Shell " + socket),
+		mu:      mutex.New("Shell " + session.Name),
 		started: make(chan struct{}),
 		done:    make(chan struct{}),
 		clients: map[*Client]struct{}{},
@@ -176,7 +176,7 @@ func NewShell(socket string) *Shell {
 		Args:    []string{"-" + path.Base(LoginShell)},
 		Env:     os.Environ(),
 		eb:      NewEscapeBuffer(0),
-		socket:  socket,
+		session: session,
 	}
 	s.eb.AddSequence(scasb, func(eb *EscapeBuffer) bool {
 		eb.inalt = true
@@ -216,7 +216,7 @@ func (s *Shell) Count() int {
 	for pid, client := range s.pids {
 		if syscall.Kill(pid, 0) != nil {
 			delete(s.pids, pid)
-			s.Detach(client)
+			s.detach(client)
 		}
 	}
 	return len(s.pids)
@@ -262,6 +262,17 @@ func (s *Shell) Attach(c *Client) int {
 	return len(s.clients) - 1
 }
 
+func (s *Shell) CountClients() int {
+	defer s.mu.Lock("CountClients")()
+	cnt := 0
+	for c := range s.clients {
+		if c.IsActive() {
+			cnt++
+		}
+	}
+	return cnt
+}
+
 func (s *Shell) Take(c *Client, requestSize bool) {
 	defer c.mu.Lock("Take1")()
 	if c.primary {
@@ -287,6 +298,10 @@ func (s *Shell) Take(c *Client, requestSize bool) {
 func (s *Shell) Detach(c *Client) {
 	log.Infof("detach client %s", c.Name())
 	defer s.mu.Lock("Detach")()
+	s.detach(c)
+}
+
+func (s *Shell) detach(c *Client) {
 	if _, ok := s.clients[c]; ok {
 		delete(s.clients, c)
 		s.wg.Done()
@@ -362,8 +377,9 @@ func (s *Shell) runout() {
 }
 
 func (s *Shell) Start(debug bool) error {
+	s.Setenv("_PTY_NAME", s.session.Name)
 	s.Setenv("_PTY_SHELL", "true")
-	s.Setenv("_PTY_SOCKET", s.socket)
+	s.Setenv("_PTY_SOCKET", s.session.Addr())
 	if s.pty != nil {
 		return errors.New("shell already started")
 	}
@@ -372,7 +388,7 @@ func (s *Shell) Start(debug bool) error {
 		if value == "" {
 			continue
 		}
-		sock := s.socket + "-" + name + fwdSuffix
+		sock := name + fwdSuffix
 		s.Setenv(name, sock)
 		if err := NewForwarder(name, sock); err != nil {
 			exitf("forwarder[%s]: %s\n", name, err)
