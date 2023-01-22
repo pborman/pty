@@ -15,11 +15,13 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"strconv"
 
 	"github.com/pborman/pty/log"
+	"github.com/pborman/pty/mutex"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
@@ -52,10 +54,17 @@ func exit(code int) {
 		terminal.Restore(0, ostate)
 	}
 	log.Errorf("exit(%d)", code)
-	// This is our thread
-	log.DumpStack()
-	// This is all the goroutines
-	log.DumpGoroutines()
+	if code != 0 {
+		// Dump out the state of all our muticies
+		var buf bytes.Buffer
+		mutex.Dump(&buf)
+		log.Errorf("%s", buf.String())
+
+		// This is our thread
+		log.DumpStack()
+		// This is all the goroutines
+		log.DumpGoroutines()
+	}
 	os.Exit(code)
 }
 
