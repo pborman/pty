@@ -89,7 +89,7 @@ func main() {
 	// If internal is set then we are being called from spawSession.
 	if *internal != "" {
 		session := MakeSession(*internal)
-		log.Init("S-" + strings.TrimPrefix(filepath.Base(*internal), "session"))
+		log.Init(session.path + "/log/server")
 		log.TakeStderr()
 		session.run(*internalDebug)
 		return
@@ -154,7 +154,7 @@ func main() {
 		}
 	}
 
-	log.Init("C-" + strings.TrimPrefix(session.Name, "session"))
+	log.Init(session.path + "/log/client")
 	log.TakeStderr()
 
 	if !session.Ping() {
@@ -229,7 +229,6 @@ func main() {
 	ecnt := 0
 	rcnt := 0
 	for {
-		log.Infof("%d Reading from stdin", rcnt)
 		rcnt++
 		n, rerr := os.Stdin.Read(buf[:])
 
