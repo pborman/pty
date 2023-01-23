@@ -84,7 +84,7 @@ func SelectSession() (*Session, error) {
 		if err != nil {
 			exitf("%v", err)
 		}
-		if loginShell != "" && name == "shell" {
+		if loginShell != "" && (name == "shell" || name == "sh"){
 			execsh()
 		}
 		if !ValidSessionName(name) {
@@ -125,7 +125,7 @@ Loop:
 		if name == "" {
 			return nil, nil
 		}
-		if name == "shell" {
+		if name == "shell" || name == "sh" {
 			if loginShell == "" {
 				exitf("$SHELL not set.")
 			}
