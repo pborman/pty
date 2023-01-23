@@ -88,6 +88,8 @@ func New(name string) *Mutex {
 		switch strings.ToLower(os.Getenv("__MUTEX_DEBUG")) {
 		case "t", "true", "yes", "1":
 			debug = true
+		case "f", "false", "no", "0":
+			debug = false
 		}
 	})
 	if !debug {
