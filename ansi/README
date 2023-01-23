@@ -1,4 +1,33 @@
-This package should not be needed.  Instead, github.com/pborman/ansi
-should be used.  However, this version of the package seems to be newer
-than github.com/pborman/ansi.  I would update that one but I am not
-sure if it would break any existing code.
+You should be using github.com/pborman/ansi and not this package.
+
+This package should not be needed.  Instead, github.com/pborman/ansi should be
+used.  However, this version of the package seems to be newer than
+github.com/pborman/ansi.  Unfortunately there are conflicts between the two
+packages.
+
+The Strip function has been renamed Strip1.  The new Strip function is Unicode
+safe and will not strip unicode characters.
+
+The new package does not contain the Decode function.  You are expected to use
+the Reader.
+
+The S structures are not the same.
+
+The old S structure is:
+	type S struct {
+		Code   Name     // The escape sequences sans parameters
+		Type   string   // The type of escape sequence
+		Params []string // parameters
+	}
+The new S structure is:
+	type S struct {
+		Type   string   // The type of sequence
+		Text   string   // The actual text of the sequence
+		Code   Name     // The escape sequence sans parameters (empty for text)
+		Params []string // parameters
+		Error  error    // Any encoutered error while processing the sequence
+	}
+
+In the old S structure Code would contain plain text if Type was "".  In the new
+structure Text contains the raw text while Code only contains a canonicalized
+version of the escapce sequence, if any.
