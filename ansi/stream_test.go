@@ -8,7 +8,7 @@ import (
 
 func TestDecodeStream(t *testing.T) {
 	want := input + input2
-	d := New(strings.NewReader(want))
+	d := NewReader(strings.NewReader(want))
 	seen := map[string]bool{}
 	var read []string
 	for {
