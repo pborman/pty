@@ -138,7 +138,7 @@ func main() {
 			exitf("invalid session name %q", args[0])
 		}
 		session = MakeSession(args[0])
-		
+
 		if !session.Check() {
 			exitf("no such session %s", args[0])
 		}
