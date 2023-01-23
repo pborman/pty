@@ -345,7 +345,7 @@ func (s *Shell) runout() {
 				for c := range s.clients {
 					if !c.Output(nbuf) {
 						log.Infof("write to client %s failed", c.Name())
-						s.Detach(c)
+						s.detach(c)
 					}
 				}
 			}
@@ -353,7 +353,7 @@ func (s *Shell) runout() {
 				log.Infof("deleting all clients")
 				for c := range s.clients {
 					c := c
-					s.Detach(c)
+					s.detach(c)
 					go func() {
 						checkClose(c)
 					}()

@@ -84,7 +84,7 @@ func SelectSession() (*Session, error) {
 		if err != nil {
 			exitf("%v", err)
 		}
-		if loginShell != "" && (name == "shell" || name == "sh"){
+		if loginShell != "" && (name == "shell" || name == "sh") {
 			execsh()
 		}
 		if !ValidSessionName(name) {
@@ -206,10 +206,10 @@ func GetSessions() []*Session {
 	var wg sync.WaitGroup
 
 	for _, name := range dirs {
-		if name == "log" {
+		if name == "" || name == "@" || name[0] != '@' {
 			continue
 		}
-		s := MakeSession(name)
+		s := MakeSession(name[1:])
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

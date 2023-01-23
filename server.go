@@ -27,6 +27,7 @@ import (
 	"syscall"
 
 	"github.com/pborman/pty/log"
+	"github.com/pborman/pty/mutex"
 )
 
 func (s *Session) shell(debug bool) {
@@ -49,6 +50,9 @@ func (s *Session) shell(debug bool) {
 	go func() {
 		for s := range ch {
 			log.Errorf("signal %v", s)
+			var buf bytes.Buffer
+			mutex.Dump(&buf)
+			log.Errorf("Mutex Dump:\n%s", buf.String())
 			log.DumpGoroutines()
 			switch s {
 			case syscall.SIGABRT, syscall.SIGBUS, syscall.SIGSEGV:

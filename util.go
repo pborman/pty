@@ -58,7 +58,7 @@ func exit(code int) {
 		// Dump out the state of all our muticies
 		var buf bytes.Buffer
 		mutex.Dump(&buf)
-		log.Errorf("%s", buf.String())
+		log.Errorf("Mutex Dump:\n%s", buf.String())
 
 		// This is our thread
 		log.DumpStack()

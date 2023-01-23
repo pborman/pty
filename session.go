@@ -33,11 +33,11 @@ import (
 // the Name and the path.  A server will call Listen on the session while a
 // client will call Dial on the session.
 type Session struct {
-	Name  string // Name of the session (client and server)
-	cnt   int    // Set by Check to the current number of clients
-	path  string // The directory for this session
-	spawn bool   // respawn rather than execing a shell
-	started bool // set true if we started the session
+	Name    string // Name of the session (client and server)
+	cnt     int    // Set by Check to the current number of clients
+	path    string // The directory for this session
+	spawn   bool   // respawn rather than execing a shell
+	started bool   // set true if we started the session
 }
 
 const validBytes = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-.+!=:[]<>{}"
@@ -62,7 +62,7 @@ func MakeSession(name string) *Session {
 	}
 	s := &Session{
 		Name:  name,
-		path:  filepath.Join(user.HomeDir, rcdir, name),
+		path:  filepath.Join(user.HomeDir, rcdir, "@"+name),
 		spawn: spawn,
 	}
 	os.MkdirAll(s.path, 0700)
@@ -235,9 +235,9 @@ func (s *Session) Command(req, resp messageKind) (string, error) {
 }
 
 func (s *Session) PS() string {
-        pid, ok := s.Pid()
-        if ok {
-                return PS(pid)
-        }
-        return ""
+	pid, ok := s.Pid()
+	if ok {
+		return PS(pid)
+	}
+	return ""
 }
