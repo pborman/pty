@@ -22,7 +22,6 @@ import (
 
 	"github.com/pborman/pty/log"
 	"github.com/pborman/pty/mutex"
-	"golang.org/x/crypto/ssh/terminal"
 )
 
 var (
@@ -49,10 +48,9 @@ func debugf(format string, v ...interface{}) {
 	}
 }
 
+// exit is the only path to os.Exit after the init functions have run
+// and the flags have been parsed.
 func exit(code int) {
-	if ostate != nil {
-		terminal.Restore(0, ostate)
-	}
 	log.Errorf("exit(%d)", code)
 	if code != 0 {
 		// Dump out the state of all our muticies

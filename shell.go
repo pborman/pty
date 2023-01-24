@@ -391,7 +391,7 @@ func (s *Shell) Start(debug bool) error {
 		sock := name + fwdSuffix
 		s.Setenv(name, sock)
 		if err := NewForwarder(name, sock); err != nil {
-			exitf("forwarder[%s]: %s\n", name, err)
+			s.session.Exitf("forwarder[%s]: %s\n", name, err)
 		}
 	}
 	if s.cmd == nil {
@@ -449,7 +449,7 @@ func (s *Shell) Exit() {
 		}
 		checkClose(c)
 	}
-	exit(0)
+	s.session.Exit(0)
 }
 
 func (s *Shell) List(me *Client) {

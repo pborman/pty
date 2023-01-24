@@ -33,30 +33,30 @@ import (
 func (s *Session) shell(debug bool) {
 	conn, err := s.Listen()
 	if err != nil {
-		exitf("server: %v", err)
+		s.Exitf("server: %v", err)
 	}
 
 	shell := NewShell(s)
 	if err := shell.Start(debug); err != nil {
-		exitf("start: %v\n", err)
+		s.Exitf("start: %v\n", err)
 	}
 	go func() {
 		shell.Wait()
-		os.Exit(0)
+		s.Exit(0)
 	}()
 
 	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, syscall.SIGABRT, syscall.SIGBUS, syscall.SIGQUIT, syscall.SIGSEGV)
 	go func() {
-		for s := range ch {
-			log.Errorf("signal %v", s)
+		for sig := range ch {
+			log.Errorf("signal %v", sig)
 			var buf bytes.Buffer
 			mutex.Dump(&buf)
 			log.Errorf("Mutex Dump:\n%s", buf.String())
 			log.DumpGoroutines()
-			switch s {
+			switch sig {
 			case syscall.SIGABRT, syscall.SIGBUS, syscall.SIGSEGV:
-				exitf("exiting on signal %d", s)
+				s.Exitf("exiting on signal %d", sig)
 			}
 		}
 	}()
@@ -64,7 +64,7 @@ func (s *Session) shell(debug bool) {
 	for {
 		c, err := conn.Accept()
 		if err != nil {
-			exitf("server: %v", err)
+			s.Exitf("server: %v", err)
 		}
 		log.Infof("accepted new connection")
 		go func() {
@@ -216,7 +216,7 @@ func (s *Shell) attach(c net.Conn) {
 // s.run().
 func (s *Session) Spawn(debugFile string, foreground bool) {
 	if s.Check() {
-		exitf("Session %q already exists", s.Name)
+		s.Exitf("Session %q already exists", s.Name)
 	}
 	if foreground {
 		s.run(debugFile)
@@ -224,7 +224,7 @@ func (s *Session) Spawn(debugFile string, foreground bool) {
 	}
 	// We prepend session with a "+" to indicate we
 	// want our child to fork another child and then
-	// exit.
+	// s.Exit.
 	args := []string{"--internal", "+" + s.Name}
 	if debugFile != "" {
 		args = append(args, "--internal_debug", s.Name+debugSuffix)
@@ -234,14 +234,14 @@ func (s *Session) Spawn(debugFile string, foreground bool) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{}
 
 	if err := cmd.Start(); err != nil {
-		exitf("starting subprocess: %v", err)
+		s.Exitf("starting subprocess: %v", err)
 	}
 	fmt.Printf("Started session %s\n", s.Name)
 	s.started = true
 	go func() {
 		err := cmd.Wait()
 		if err != nil {
-			fmt.Printf("internal shell exited: %v", err)
+			fmt.Printf("internal shell s.Exited: %v", err)
 		}
 	}()
 }
@@ -258,7 +258,7 @@ func (s *Session) run(debugFile string) {
 		}
 		if err := cmd.Start(); err != nil {
 			log.Errorf("rexec failed: %v", err)
-			exitf("rexec failed: %v\n", err)
+			s.Exitf("rexec failed: %v\n", err)
 		}
 		return
 	}

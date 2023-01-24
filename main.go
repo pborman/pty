@@ -33,13 +33,6 @@ import (
 	"github.com/pborman/pty/mutex"
 	"github.com/pborman/pty/parse"
 	ttyname "github.com/pborman/pty/tty"
-	"golang.org/x/crypto/ssh/terminal"
-)
-
-var (
-	ostate *terminal.State
-	tilde  = byte('P' & 0x1f)
-	copyFD int
 )
 
 var pprofFd *os.File
@@ -108,8 +101,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var ok bool
-	tilde, ok = parseEscapeChar(*echar)
+	tilde, ok := parseEscapeChar(*echar)
 	if !ok {
 		exitf("invalid escape character: %q", *echar)
 	}
@@ -156,6 +148,7 @@ func main() {
 
 	log.Init(session.path + "/log/client")
 	log.TakeStderr()
+	session.tilde = tilde
 
 	if !session.Ping() {
 		var debugFile string
@@ -184,15 +177,20 @@ func main() {
 		myname = "unknown"
 	}
 	displayMotd()
-	ostate, err = terminal.MakeRaw(0)
-	if err != nil {
+
+	if err := session.MakeRaw(); err != nil {
 		exitf("stty: %v\n", err)
 	}
+
+	// Here on down we need to use session.exit
+	exit := session.Exit
+	exitf := session.Exitf
+
 	if !session.started {
 		fmt.Printf("Connected to session %s\r\n", session.Name)
 	}
-	if tilde != 0 {
-		fmt.Printf("Escape character is %s\r\n", printEscape(tilde))
+	if session.tilde != 0 {
+		fmt.Printf("Escape character is %s\r\n", printEscape(session.tilde))
 	}
 
 	w := NewMessengerWriter(c)
@@ -233,14 +231,14 @@ func main() {
 		n, rerr := os.Stdin.Read(buf[:])
 
 		var cmd byte
-		if tilde != 0 {
+		if session.tilde != 0 {
 		Loop:
 			// Look tilde followed by . or :
 			for _, c := range buf[:n] {
 				switch state {
 				case 0:
 					switch c {
-					case tilde:
+					case session.tilde:
 						state = 1
 					}
 				case 1:
@@ -249,11 +247,11 @@ func main() {
 						cmd = c
 						state = 2
 						break Loop
-					case tilde:
+					case session.tilde:
 						// we should probably strip one of the two tilde's.
 						n = 0
 						state = 0
-						w.Write([]byte{tilde})
+						w.Write([]byte{session.tilde})
 						break Loop
 					default:
 						state = 0
@@ -276,8 +274,8 @@ func main() {
 		switch cmd {
 		case 0:
 			continue
-		case tilde:
-			if _, err := os.Stdout.Write([]byte{tilde}); err != nil {
+		case session.tilde:
+			if _, err := os.Stdout.Write([]byte{session.tilde}); err != nil {
 				log.Infof("%v", err)
 			}
 		case '.':
@@ -286,7 +284,7 @@ func main() {
 			}
 			exit(0)
 		case ':':
-			terminal.Restore(0, ostate)
+			session.MakeCooked()
 			fmt.Printf("\nCommand: ")
 			line, err := readline()
 			if err != nil {
@@ -300,8 +298,7 @@ func main() {
 			if len(args) > 0 {
 				command(false, session, w, args...)
 			}
-			ostate, err = terminal.MakeRaw(0)
-			if err != nil {
+			if err := session.MakeRaw(); err != nil {
 				exitf("stty: %v\n", err)
 			}
 			command(true, session, w, args...)
