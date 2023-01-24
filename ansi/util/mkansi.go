@@ -13,9 +13,9 @@ type Code struct {
 	Name     string // Name of the sequence (CUU)
 	Desc     string // Long name of the sequence  (Cursor Up)
 	Rep      string // quoted string representation ("\033[A")
-	Notation int // What sort of notation is used ("Pn1;Pn2")
-	Seq      []int // Representation converted to bytes
-	Def      []int // Default values
+	Notation int    // What sort of notation is used ("Pn1;Pn2")
+	Seq      []int  // Representation converted to bytes
+	Def      []int  // Default values
 	Text     string // Descriptive text
 }
 
@@ -316,7 +316,8 @@ const (`)
 			panic("unkonwn seq: " + c.Name)
 		}
 		i := len(c.Seq)
-		for ; i > 0 && c.Seq[i-1] < 0x100; i-- { }
+		for ; i > 0 && c.Seq[i-1] < 0x100; i-- {
+		}
 		for _, r := range c.Seq[i:] {
 			c.Rep += string(r)
 		}
@@ -413,7 +414,7 @@ var Table = map[string]*Sequence {`)
 		}
 		fmt.Printf("\t%s: &%s_,\n", c.Name, c.Name)
 		if c.Notation == C1 {
-		fmt.Printf("\t\"\\%03o\": &%s_,\n", c.Seq[len(c.Seq)-1] + 0x40, c.Name)
+			fmt.Printf("\t\"\\%03o\": &%s_,\n", c.Seq[len(c.Seq)-1]+0x40, c.Name)
 		}
 	}
 	fmt.Printf("}\n")
