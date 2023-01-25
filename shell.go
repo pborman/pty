@@ -130,7 +130,7 @@ type ShellClient interface {
 	// Send sends a message to the client.
 	Send(int, []byte) bool
 
-	// SendLoced sends a message to the client, which is already locked.
+	// SendLocked sends a message to the client, which is already locked.
 	SendLocked(int, []byte) bool
 
 	// Close is called when no further output will be sent to the client.
