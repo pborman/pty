@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/pborman/pty/log"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 // A Session represent a (possibly not created) session.  It is used in both the
@@ -38,6 +39,10 @@ type Session struct {
 	path    string // The directory for this session
 	spawn   bool   // respawn rather than execing a shell
 	started bool   // set true if we started the session
+
+	// Below are fields only used by a client
+	ostate *terminal.State
+	tilde  byte
 }
 
 const validBytes = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-.+!=:[]<>{}"
@@ -64,6 +69,7 @@ func MakeSession(name string) *Session {
 		Name:  name,
 		path:  filepath.Join(user.HomeDir, rcdir, "@"+name),
 		spawn: spawn,
+		tilde: byte('P' & 0x1f),
 	}
 	os.MkdirAll(s.path, 0700)
 	return s
@@ -174,7 +180,7 @@ func (s *Session) Listen() (net.Listener, error) {
 	}
 	conn, err := net.ListenTCP("tcp", addr)
 	if err != nil {
-		exitf("server: %v", err)
+		s.Exitf("server: %v", err)
 	}
 	if err := s.SetAddr(conn.Addr().String()); err != nil {
 		s.Remove()
@@ -240,4 +246,41 @@ func (s *Session) PS() string {
 		return PS(pid)
 	}
 	return ""
+}
+
+func (s *Session) MakeRaw() (err error) {
+	if s.ostate != nil {
+		s.MakeCooked()
+		s.Exitf("Calling MakeRaw on a raw session.")
+	}
+	s.ostate, err = terminal.MakeRaw(0)
+	return err
+}
+
+func (s *Session) MakeCooked() (err error) {
+	if s.ostate == nil {
+		return nil
+	}
+	if err := terminal.Restore(0, s.ostate); err != nil {
+		return err
+	}
+	s.ostate = nil
+	return nil
+}
+
+// A client session must always call Exit or Exitf to make sure the
+// terminal is left in a cooked state.  It is safe to call this from
+// the server as MakeCooked will do nothing.
+
+func (s *Session) Exit(code int) {
+	s.MakeCooked()
+	log.DepthErrorf(1, "exit code %d", code)
+	exit(code)
+}
+
+func (s *Session) Exitf(format string, v ...interface{}) {
+	s.MakeCooked()
+	log.DepthErrorf(1, format, v...)
+	printf(format, v...)
+	exit(1)
 }
