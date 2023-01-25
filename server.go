@@ -78,9 +78,8 @@ func (s *Shell) attach(c net.Conn) {
 	// Attach forwards the shells output to c.
 	mw := NewMessengerWriter(c)
 	client := NewClient(mw)
-	s.Attach(client)
 	defer func() { go s.Detach(client) }()
-
+	attached := false
 	ech := make(chan error, 1)
 	go func() {
 		r := NewMessengerReader(c, func(kind messageKind, msg []byte) {
@@ -119,6 +118,10 @@ func (s *Shell) attach(c net.Conn) {
 			case pingMessage:
 				mw.Send(ackMessage, msg)
 			case ttynameMessage:
+				if !attached {
+					s.Attach(client)
+					attached = true
+				}
 				// the ttynameMessage is sent by each client as
 				// it attaches, excluding clients that are just
 				// asking for information (e.g., pty --list).
