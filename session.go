@@ -223,10 +223,9 @@ func (s *Session) Command(req, resp messageKind) (string, error) {
 	})
 
 	go func() {
-		var err error
 		var buf [256]byte
 		for {
-			if _, err = r.Read(buf[:]); err != nil {
+			if _, err := r.Read(buf[:]); err != nil {
 				log.Infof("Done reading from %s", s.Name)
 				return
 			}
