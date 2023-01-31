@@ -157,7 +157,6 @@ type Shell struct {
 	clients    map[*Client]struct{}
 	pids       map[int]*Client
 	eb         *EscapeBuffer
-	scr        *Screen
 	exiting    bool
 	rows, cols int
 }
@@ -471,6 +470,5 @@ func (s *Shell) List(me *Client) {
 }
 
 func (s *Shell) Setsize(rows, cols int) error {
-	s.scr.Winch(rows, cols)
 	return setsize(s.pty, rows, cols)
 }
