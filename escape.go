@@ -150,7 +150,7 @@ func (e *EscapeBuffer) Write(buf []byte) (int, error) {
 		add(buf)
 		return n, nil
 	}
-	// If e.partial las length then its cap is how many bytes we
+	// If e.partial has length then its cap is how many bytes we
 	// need to match the longest partial sequence match.
 	// Fill up the partial buffer with as many bytes as we can,
 	// recurse, and try again.  If buf cannot fully fill
