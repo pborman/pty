@@ -196,21 +196,35 @@ func main() {
 	w := NewMessengerWriter(c)
 	ready := make(chan struct{})
 	go func() {
-
 		mr := NewMessengerReader(c, func(kind messageKind, data []byte) {
 			clientCommand(w, kind, data, ready)
 		})
 		var buf [1024]byte
 		var err error
 		var n int
+		var sendSSH = ([]byte)("\033[z")
+
+		write := func(buf []byte) {
+			if len(buf) == 0 {
+				return
+			}
+			if _, err := os.Stdout.Write(buf); err != nil {
+				log.Errorf("Writing to stdout: %v", err)
+			}
+			tee.Write(buf)
+		}
 		for err == nil {
 			n, err = mr.Read(buf[:])
-			if n > 0 {
-				if _, err := os.Stdout.Write(buf[:n]); err != nil {
-					log.Errorf("Writing to stdout: %v", err)
-				}
-				tee.Write(buf[:n])
+			wbuf := buf[:n]
+
+			// We assume our magic escape sequence always
+			// comes in a single message
+			if x := bytes.Index(wbuf, sendSSH); x >= 0 {
+				write(wbuf[:x])
+				command(true, session, w, "ssh")
+				wbuf = wbuf[x+len(sendSSH):]
 			}
+			write(wbuf)
 		}
 		if err != nil && err != io.EOF {
 			exitf("client exit: %v", err)
