@@ -101,7 +101,7 @@ func SelectSession() (*Session, error) {
 	}
 	fmt.Printf(" name) Create a new session named name\n")
 	for i, s := range sessions {
-		fmt.Printf("    %d) %s (%d Client%s) %s\n", i+1, s.Name, s.cnt, splur(s.cnt), s.Title())
+		fmt.Printf("    %d) %s (%d Client%s) %s %s\n", i+1, s.Name, s.cnt, splur(s.cnt), s.Title(), s.TTYSize())
 		if ps := s.PS(); ps != "" {
 			for _, line := range strings.Split(ps, "\n") {
 				if line == "" {

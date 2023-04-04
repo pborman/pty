@@ -152,6 +152,7 @@ func (s *Shell) attach(c net.Conn) {
 					return
 				}
 				rows, cols := decodeSize(msg)
+				s.session.SetTTYSize(fmt.Sprintf("(%dx%d)", cols, rows))
 				unlock := s.mu.Lock("ttysizeMessage")
 				if rows == s.rows && cols == s.cols {
 					unlock()

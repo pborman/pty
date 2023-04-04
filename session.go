@@ -118,6 +118,13 @@ func (s *Session) Addr() string {
 	return ""
 }
 
+func (s *Session) TTYSize() string {
+	if data, err := s.readfile("ttysize"); err == nil {
+		return data
+	}
+	return ""
+}
+
 func (s *Session) DebugPath() string {
 	return filepath.Join(s.path, "debug")
 }
@@ -133,6 +140,11 @@ func (s *Session) SetTitle(title string) error {
 func (s *Session) SetAddr(addr string) error {
 	// s.addr = addr
 	return s.writefile("addr", addr)
+}
+
+func (s *Session) SetTTYSize(size string) error {
+	// s.addr = addr
+	return s.writefile("ttysize", size)
 }
 
 func (s *Session) Ping() bool {
