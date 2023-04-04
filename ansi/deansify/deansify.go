@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	r := ansi.NewReader(os.Stdin)
+	r := ansi.NewWithBuffer(os.Stdin, make([]byte,1024*1024))
 	w := bufio.NewWriter(os.Stdout)
 	var sawCR bool
 	for {
