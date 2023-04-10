@@ -259,7 +259,15 @@ func (s *Session) PS() string {
 	return ""
 }
 
+func isPipe() bool {
+	st, _ := os.Stdin.Stat()
+	return (uint32(st.Mode()) & uint32(os.ModeNamedPipe)) != 0
+}
+
 func (s *Session) MakeRaw() (err error) {
+	if isPipe() {
+		return nil
+	}
 	if s.ostate != nil {
 		s.MakeCooked()
 		s.Exitf("Calling MakeRaw on a raw session.")
@@ -269,6 +277,9 @@ func (s *Session) MakeRaw() (err error) {
 }
 
 func (s *Session) MakeCooked() (err error) {
+	if isPipe() {
+		return nil
+	}
 	if s.ostate == nil {
 		return nil
 	}
