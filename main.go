@@ -197,7 +197,7 @@ func main() {
 	ready := make(chan struct{})
 	go func() {
 		mr := NewMessengerReader(c, func(kind messageKind, data []byte) {
-			clientCommand(w, kind, data, ready)
+			clientCommand(w, kind, data, ready, session)
 		})
 		var buf [1024]byte
 		var err error
@@ -233,7 +233,7 @@ func main() {
 	}()
 
 	// Below is the code that reads from stdin and writes to the server.
-	watchSigwinch(w)
+	watchSigwinch(w, session)
 	w.Sendf(ttynameMessage, "%d:%s", os.Getpid(), myname)
 	var buf [32768]byte
 	state := 0
@@ -370,7 +370,7 @@ func ping(w *MessengerWriter) error {
 }
 
 // clientCommand handles command recevied from the server.
-func clientCommand(w *MessengerWriter, kind messageKind, data []byte, ready chan struct{}) {
+func clientCommand(w *MessengerWriter, kind messageKind, data []byte, ready chan struct{}, s *Session) {
 	log.Infof("Received command %v", kind)
 	switch kind {
 	case pingMessage:
@@ -409,6 +409,7 @@ func clientCommand(w *MessengerWriter, kind messageKind, data []byte, ready chan
 		rows, cols, err := pty.Getsize(os.Stdin)
 		if err == nil {
 			w.Send(ttysizeMessage, encodeSize(rows, cols))
+			s.SetTTYSize(rows, cols)
 		}
 		for _, name := range config.Forward {
 			value := os.Getenv(name)
@@ -612,10 +613,11 @@ func command(raw bool, session *Session, w *MessengerWriter, args ...string) {
 	}
 }
 
-func watchSigwinch(w *MessengerWriter) error {
+func watchSigwinch(w *MessengerWriter, s *Session) error {
 	rows, cols, err := pty.Getsize(os.Stdin)
 	if err == nil {
 		w.Send(ttysizeMessage, encodeSize(rows, cols))
+		s.SetTTYSize(rows, cols)
 	}
 	if err != nil {
 		return nil

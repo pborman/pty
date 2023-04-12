@@ -142,9 +142,11 @@ func (s *Session) SetAddr(addr string) error {
 	return s.writefile("addr", addr)
 }
 
-func (s *Session) SetTTYSize(size string) error {
+func (s *Session) SetTTYSize(rows, cols int) error {
 	// s.addr = addr
-	return s.writefile("ttysize", size)
+	err := s.writefile("ttysize", fmt.Sprintf("(%dx%d)", cols, rows))
+	log.Infof("Setting size to (%dx%d): %v", cols, rows, err)
+	return err
 }
 
 func (s *Session) Ping() bool {
