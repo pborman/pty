@@ -26,6 +26,8 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/kr/pty"
 )
 
 const (
@@ -73,6 +75,11 @@ func execsh() {
 // bool is true then this session must be created.  An error is returned if
 // there was an error reading the name of the session.
 func SelectSession() (*Session, error) {
+	mysize := ""
+	rows, cols, err := pty.Getsize(os.Stdin)
+	if err == nil {
+		mysize = fmt.Sprintf("(%dx%d)", cols, rows)
+	}
 	sessions := GetSessions()
 	if len(sessions) == 0 {
 		if loginShell != "" {
@@ -99,9 +106,15 @@ func SelectSession() (*Session, error) {
 	if loginShell != "" {
 		fmt.Printf("shell) Spawn %s\n", loginShell)
 	}
+	var candidates []int
+
 	fmt.Printf(" name) Create a new session named name\n")
 	for i, s := range sessions {
-		fmt.Printf("    %d) %s (%d Client%s) %s %s\n", i+1, s.Name, s.cnt, splur(s.cnt), s.Title(), s.TTYSize())
+		size := s.TTYSize()
+		fmt.Printf("    %d) %s (%d Client%s) %s %s\n", i+1, s.Name, s.cnt, splur(s.cnt), s.Title(), size)
+		if s.cnt == 0 && size != "" && size == mysize {
+			candidates = append(candidates, i+1)
+		}
 		if ps := s.PS(); ps != "" {
 			for _, line := range strings.Split(ps, "\n") {
 				if line == "" {
@@ -117,13 +130,20 @@ func SelectSession() (*Session, error) {
 Loop:
 	for {
 		fmt.Printf("Please select a session: ")
+		if len(candidates) > 0 {
+			fmt.Printf("%v: ", candidates)
+		}
 		name, err := readline()
 		if err != nil {
 			return nil, err
 		}
 		name = strings.TrimSpace(name)
 		if name == "" {
-			return nil, nil
+			if len(candidates) > 0 {
+				name = strconv.Itoa(candidates[0])
+			} else {
+				return nil, nil
+			}
 		}
 		if name == "shell" || name == "sh" {
 			if loginShell == "" {
