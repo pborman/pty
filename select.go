@@ -106,8 +106,16 @@ func SelectSession() (*Session, error) {
 	if loginShell != "" {
 		fmt.Printf("shell) Spawn %s\n", loginShell)
 	}
-	var candidates []int
+	if *autoAttach {
+		for _, s := range sessions {
+			size := s.TTYSize()
+			if s.cnt == 0 && size != "" && size == mysize {
+				return s, nil
+			}
+		}
+	}
 
+	var candidates []int
 	fmt.Printf(" name) Create a new session named name\n")
 	for i, s := range sessions {
 		size := s.TTYSize()

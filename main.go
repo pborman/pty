@@ -36,6 +36,7 @@ import (
 )
 
 var pprofFd *os.File
+var autoAttach *bool
 
 func main() {
 	os.Setenv("GORACE", "log_path=/tmp/cloud_race")
@@ -64,6 +65,7 @@ func main() {
 	debugServer := getopt.BoolLong("debug_server", 0, "enable server debugging")
 	detach := getopt.BoolLong("detach", 0, "create and detach new shell, do not connect")
 	list := getopt.BoolLong("list", 0, "just list existing sessions")
+	autoAttach = getopt.BoolLong("auto", 0, "automatically attach to matching session")
 	getopt.Parse()
 
 	if *list {
