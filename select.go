@@ -74,7 +74,7 @@ func execsh() {
 // Select session returns the path to the selected session.  If the returned
 // bool is true then this session must be created.  An error is returned if
 // there was an error reading the name of the session.
-func SelectSession() (*Session, error) {
+func SelectSession(id string) (*Session, error) {
 	mysize := ""
 	rows, cols, err := pty.Getsize(os.Stdin)
 	if err == nil {
@@ -97,7 +97,7 @@ func SelectSession() (*Session, error) {
 		if !ValidSessionName(name) {
 			exitf("invalid session name %q", name)
 		}
-		s := MakeSession(name)
+		s := MakeSession(name, id)
 		if s.Check() {
 			exitf("session %q already exists", name)
 		}
@@ -107,6 +107,13 @@ func SelectSession() (*Session, error) {
 		fmt.Printf("shell) Spawn %s\n", loginShell)
 	}
 	if *autoAttach {
+		if id != "" {
+			for _, s := range sessions {
+				if s.cnt == 0 && s.SessionID() == id {
+					return s, nil
+				}
+			}
+		}
 		for _, s := range sessions {
 			size := s.TTYSize()
 			if s.cnt == 0 && size != "" && size == mysize {
@@ -119,7 +126,11 @@ func SelectSession() (*Session, error) {
 	fmt.Printf(" name) Create a new session named name\n")
 	for i, s := range sessions {
 		size := s.TTYSize()
-		fmt.Printf("    %d) %s (%d Client%s) %s %s\n", i+1, s.Name, s.cnt, splur(s.cnt), s.Title(), size)
+		var prefix string
+		if id != "" && id == s.SessionID() {
+			prefix = "+ "
+		}
+		fmt.Printf("    %d) %s%s (%d Client%s) %s %s\n", i+1, prefix, s.Name, s.cnt, splur(s.cnt), s.Title(), size)
 		if s.cnt == 0 && size != "" && size == mysize {
 			candidates = append(candidates, i+1)
 		}
@@ -181,7 +192,7 @@ Loop:
 			case err != nil:
 				return nil, err
 			case ok:
-				return MakeSession(name), nil
+				return MakeSession(name, id), nil
 			default:
 				continue Loop
 			}
@@ -237,7 +248,7 @@ func GetSessions() []*Session {
 		if name == "" || name == "@" || name[0] != '@' {
 			continue
 		}
-		s := MakeSession(name[1:])
+		s := MakeSession(name[1:], "")
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

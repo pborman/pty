@@ -59,7 +59,7 @@ func ValidSessionName(name string) bool {
 	return true
 }
 
-func MakeSession(name string) *Session {
+func MakeSession(name, id string) *Session {
 	// We assume ValidSessionName was called
 	spawn := strings.HasPrefix(name, "+")
 	if spawn {
@@ -72,6 +72,9 @@ func MakeSession(name string) *Session {
 		tilde: byte('P' & 0x1f),
 	}
 	os.MkdirAll(s.path, 0700)
+	if id != "" {
+		s.SetSessionID(id)
+	}
 	return s
 }
 
@@ -125,6 +128,13 @@ func (s *Session) TTYSize() string {
 	return ""
 }
 
+func (s *Session) SessionID() string {
+	if data, err := s.readfile("id"); err == nil {
+		return data
+	}
+	return ""
+}
+
 func (s *Session) DebugPath() string {
 	return filepath.Join(s.path, "debug")
 }
@@ -147,6 +157,10 @@ func (s *Session) SetTTYSize(rows, cols int) error {
 	err := s.writefile("ttysize", fmt.Sprintf("(%dx%d)", cols, rows))
 	log.Infof("Setting size to (%dx%d): %v", cols, rows, err)
 	return err
+}
+
+func (s *Session) SetSessionID(id string) error {
+	return s.writefile("id", id)
 }
 
 func (s *Session) Ping() bool {

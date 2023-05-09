@@ -60,6 +60,7 @@ func main() {
 	internalDebug := getopt.StringLong("internal_debug", 0, "", "internal only flag")
 
 	echar := getopt.StringLong("escape", 'e', "^P", "escape character")
+	sessionID := getopt.StringLong("id", 0, "", "originating ID (TERM_SESSION_ID)")
 	newSession := getopt.StringLong("new", 0, "", "create new session named NAME", "NAME")
 	debugFlag := getopt.BoolLong("debug", 0, "debug mode, leave server in foreground")
 	debugServer := getopt.BoolLong("debug_server", 0, "enable server debugging")
@@ -83,7 +84,7 @@ func main() {
 
 	// If internal is set then we are being called from spawSession.
 	if *internal != "" {
-		session := MakeSession(*internal)
+		session := MakeSession(*internal, *sessionID)
 		log.Init(session.path + "/log/server")
 		log.TakeStderr()
 		session.run(*internalDebug)
@@ -111,12 +112,12 @@ func main() {
 	var session *Session
 	switch {
 	case *newSession != "":
-		session = MakeSession(*newSession)
+		session = MakeSession(*newSession, *sessionID)
 		if session.Check() {
 			exitf("session name already in use")
 		}
 	case len(args) == 0:
-		session, err = SelectSession()
+		session, err = SelectSession(*sessionID)
 		switch err {
 		case nil:
 		case io.EOF:
@@ -131,7 +132,7 @@ func main() {
 		if !ValidSessionName(args[0]) {
 			exitf("invalid session name %q", args[0])
 		}
-		session = MakeSession(args[0])
+		session = MakeSession(args[0], *sessionID)
 
 		if !session.Check() {
 			exitf("no such session %s", args[0])

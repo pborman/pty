@@ -43,12 +43,12 @@ func SetForwarder(name, remote string) error {
 		return fmt.Errorf("no such socket: %s", name)
 	}
 	defer f.mu.Lock("SetForwarder")()
-	f.remote = MakeSession(remote)
+	f.remote = MakeSession(remote, "")
 	return nil
 }
 
 func NewForwarder(name, socket string) error {
-	s := MakeSession(socket)
+	s := MakeSession(socket, "")
 	s.Remove()
 	conn, err := s.Listen()
 	if err != nil {
