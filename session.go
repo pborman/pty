@@ -78,6 +78,11 @@ func MakeSession(name, id string) *Session {
 	return s
 }
 
+func (s *Session) Attach(id string) *Session {
+	s.SetSessionID(id)
+	return s
+}
+
 func (s *Session) Remove() {
 	if s.path != "" {
 		os.RemoveAll(s.path)

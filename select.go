@@ -101,7 +101,7 @@ func SelectSession(id string) (*Session, error) {
 		if s.Check() {
 			exitf("session %q already exists", name)
 		}
-		return s, nil
+		return s.Attach(id), nil
 	}
 	if loginShell != "" {
 		fmt.Printf("shell) Spawn %s\n", loginShell)
@@ -110,14 +110,14 @@ func SelectSession(id string) (*Session, error) {
 		if id != "" {
 			for _, s := range sessions {
 				if s.cnt == 0 && s.SessionID() == id {
-					return s, nil
+					return s.Attach(id), nil
 				}
 			}
 		}
 		for _, s := range sessions {
 			size := s.TTYSize()
 			if s.cnt == 0 && size != "" && size == mysize {
-				return s, nil
+				return s.Attach(id), nil
 			}
 		}
 	}
@@ -174,7 +174,7 @@ Loop:
 		}
 		if n, err := strconv.Atoi(name); err == nil {
 			if n >= 1 && n <= len(sessions) {
-				return sessions[n-1], nil
+				return sessions[n-1].Attach(id), nil
 			}
 			fmt.Printf("Select a number between 1 and %d\n", len(sessions))
 		} else {
@@ -184,7 +184,7 @@ Loop:
 			}
 			for _, s := range sessions {
 				if name == s.Name {
-					return s, nil
+					return s.Attach(id), nil
 				}
 			}
 			ok, err := readYesNo("Create session %s [Y/N]? ", name)
