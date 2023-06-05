@@ -114,7 +114,9 @@ const (
 	edall   = "\033[2J" // Erase all
 	edsaved = "\033[3J" // Erase Saved Lines
 	home    = "\033[H"
+	sendSSH = "\033[z"
 )
+
 
 // A ShellClient can be attached to a Shell.
 type ShellClient interface {
@@ -177,6 +179,9 @@ func NewShell(session *Session) *Shell {
 		eb:      NewEscapeBuffer(0),
 		session: session,
 	}
+	s.eb.AddSequence(sendSSH, func(eb *EscapeBuffer) bool {
+		return false
+	})
 	s.eb.AddSequence(scasb, func(eb *EscapeBuffer) bool {
 		eb.inalt = true
 		return false

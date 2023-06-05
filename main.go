@@ -205,7 +205,7 @@ func main() {
 		var buf [1024]byte
 		var err error
 		var n int
-		var sendSSH = ([]byte)("\033[z")
+		var sendSSHb = ([]byte)(sendSSH)
 
 		write := func(buf []byte) {
 			if len(buf) == 0 {
@@ -222,7 +222,7 @@ func main() {
 
 			// We assume our magic escape sequence always
 			// comes in a single message
-			if x := bytes.Index(wbuf, sendSSH); x >= 0 {
+			if x := bytes.Index(wbuf, sendSSHb); x >= 0 {
 				write(wbuf[:x])
 				command(true, session, w, "ssh")
 				wbuf = wbuf[x+len(sendSSH):]
