@@ -117,7 +117,6 @@ const (
 	sendSSH = "\033[z"
 )
 
-
 // A ShellClient can be attached to a Shell.
 type ShellClient interface {
 	// Output is called with each new block of bytes to be sent to the

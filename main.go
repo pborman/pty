@@ -199,6 +199,7 @@ func main() {
 	w := NewMessengerWriter(c)
 	ready := make(chan struct{})
 	go func() {
+		// read from the server and write to stdout
 		mr := NewMessengerReader(c, func(kind messageKind, data []byte) {
 			clientCommand(w, kind, data, ready, session)
 		})
@@ -312,9 +313,7 @@ func main() {
 				log.Warnf("parse %q: %v", line, err)
 				fmt.Printf("%v\n", err)
 			}
-			if len(args) > 0 {
-				command(false, session, w, args...)
-			}
+			command(false, session, w, args...)
 			if err := session.MakeRaw(); err != nil {
 				exitf("stty: %v\n", err)
 			}
@@ -496,6 +495,10 @@ func (t *teeer) Open(path string) {
 	unlock()
 }
 
+// Command is called with a ^P: command.  It normally is called twice for each
+// command.  The first time it is called "raw" will be set to false indicating
+// the terminal is still in cooked mode.  The second time "raw" will be set to
+// true indicating the terminal is once again in raw mode.
 func command(raw bool, session *Session, w *MessengerWriter, args ...string) {
 	if len(args) == 0 {
 		return
@@ -506,44 +509,24 @@ func command(raw bool, session *Session, w *MessengerWriter, args ...string) {
 			return
 		}
 		fmt.Printf("Commands:\n")
-		fmt.Printf("  dump   - dump stack\n")
-		fmt.Printf("  env    - display environment variables\n")
-		fmt.Printf("  excl   - detach all other clients\n")
-		fmt.Printf("  list   - list all clients\n")
-		fmt.Printf("  ps     - display processes on this pty\n")
-		fmt.Printf("  save   - save buffer to FILE\n")
-		fmt.Printf("  setenv - forward environtment variables\n")
-		fmt.Printf("  ssh    - forward SSH_AUTH_SOCK\n")
-		fmt.Printf("  tee    - tee all future output to FILE (- to close)\n")
-		fmt.Printf("  title  - set the title for this session\n")
-	case "title":
-		if raw {
-			return
-		}
-		if len(args) > 1 {
-			session.SetTitle(strings.Join(args[1:], " "))
-		}
-		fmt.Printf("%s: %s\n", session.Name, session.Title())
+		fmt.Printf("  dump    - dump stack\n")
+		fmt.Printf("  env     - display environment variables of client\n")
+		fmt.Printf("  escapes - display escape sequences in save buffers\n")
+		fmt.Printf("  excl    - detach all other clients\n")
+		fmt.Printf("  list    - list all clients\n")
+		fmt.Printf("  ps      - display processes on this pty\n")
+		fmt.Printf("  save    - save buffer to FILE\n")
+		fmt.Printf("  setenv  - forward environtment variables\n")
+		fmt.Printf("  ssh     - forward SSH_AUTH_SOCK\n")
+		fmt.Printf("  tee     - tee all future output to FILE (- to close)\n")
+		fmt.Printf("  title   - set the title for this session\n")
 	case "dump":
 		if raw {
 			w.Send(dumpMessage, nil)
 		} else {
 			log.DumpGoroutines()
 		}
-	case "list":
-		if raw {
-			w.Send(listMessage, nil)
-		}
-	case "ps":
-		if raw {
-			return
-		}
-		os.Stdout.Write(ps(w))
-	case "excl":
-		if raw {
-			w.Send(exclusiveMessage, nil)
-		}
-	case "getenv", "env":
+	case "env", "getenv":
 		if raw {
 			return
 		}
@@ -566,6 +549,36 @@ func command(raw bool, session *Session, w *MessengerWriter, args ...string) {
 				fmt.Printf("%s not set\n", name)
 			}
 		}
+	case "escapes":
+		if raw {
+			return
+		}
+		if len(args) != 2 {
+			fmt.Printf("usage: escapes [alt|normal]\n")
+			return
+		}
+		w.Send(escapeMessage, []byte(args[1]))
+	case "excl":
+		if raw {
+			w.Send(exclusiveMessage, nil)
+		}
+	case "list":
+		if raw {
+			w.Send(listMessage, nil)
+		}
+	case "ps":
+		if raw {
+			return
+		}
+		os.Stdout.Write(ps(w))
+	case "save":
+		if !raw && len(args) != 2 {
+			fmt.Printf("usage: save FILENAME\n")
+			return
+		}
+		if raw && len(args) == 2 {
+			w.Send(saveMessage, []byte(args[1]))
+		}
 	case "setenv":
 		if !raw {
 			return
@@ -583,14 +596,6 @@ func command(raw bool, session *Session, w *MessengerWriter, args ...string) {
 		if value, ok := os.LookupEnv("SSH_AUTH_SOCK"); ok {
 			fmt.Fprintf(w, "SSH_AUTH_SOCK=%s\r", quoteShell(value))
 		}
-	case "save":
-		if !raw && len(args) != 2 {
-			fmt.Printf("usage: save FILENAME\n")
-			return
-		}
-		if raw && len(args) == 2 {
-			w.Send(saveMessage, []byte(args[1]))
-		}
 	case "tee":
 		if raw {
 			return
@@ -600,15 +605,14 @@ func command(raw bool, session *Session, w *MessengerWriter, args ...string) {
 			return
 		}
 		tee.Open(args[1])
-	case "escapes":
+	case "title":
 		if raw {
 			return
 		}
-		if len(args) != 2 {
-			fmt.Printf("usage: escapes [alt|normal]\n")
-			return
+		if len(args) > 1 {
+			session.SetTitle(strings.Join(args[1:], " "))
 		}
-		w.Send(escapeMessage, []byte(args[1]))
+		fmt.Printf("%s: %s\n", session.Name, session.Title())
 	default:
 		if !raw {
 			fmt.Printf("unknown command: %s\n", args[0])
