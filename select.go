@@ -81,11 +81,26 @@ func SelectSession(id string) (*Session, error) {
 		mysize = fmt.Sprintf("(%dx%d)", cols, rows)
 	}
 	sessions := GetSessions()
+
+	var nextSession string
+	sessionAvailable := func(i int) bool {
+		nextSession = fmt.Sprintf("Session-%d", i)
+		for _, s := range sessions {
+			if s.Name == nextSession {
+				return false
+			}
+		}
+		return true
+	}
+	for i := 1; !sessionAvailable(i); i++ {
+		;
+	}
+
 	if len(sessions) == 0 {
 		if loginShell != "" {
-			fmt.Printf("Name of session to create (or shell): ")
+			fmt.Printf("Name of session to create (or shell) [%s]: ", nextSession)
 		} else {
-			fmt.Printf("Name of session to create: ")
+			fmt.Printf("Name of session to create [%s]: ", nextSession)
 		}
 		name, err := readline()
 		if err != nil {
@@ -93,6 +108,9 @@ func SelectSession(id string) (*Session, error) {
 		}
 		if loginShell != "" && (name == "shell" || name == "sh") {
 			execsh()
+		}
+		if (name == "") {
+			name = nextSession
 		}
 		if !ValidSessionName(name) {
 			exitf("invalid session name %q", name)
@@ -129,6 +147,7 @@ func SelectSession(id string) (*Session, error) {
 		var prefix string
 		if id != "" && id == s.SessionID() {
 			prefix = "+ "
+			nextSession = s.Name
 		}
 		fmt.Printf("    %d) %s%s (%d Client%s) %s %s\n", i+1, prefix, s.Name, s.cnt, splur(s.cnt), s.Title(), size)
 		if s.cnt == 0 && size != "" && size == mysize {
@@ -148,7 +167,7 @@ func SelectSession(id string) (*Session, error) {
 	}
 Loop:
 	for {
-		fmt.Printf("Please select a session: ")
+		fmt.Printf("Please select a session [%s]: ", nextSession)
 		if len(candidates) > 0 {
 			fmt.Printf("%v: ", candidates)
 		}
@@ -161,7 +180,7 @@ Loop:
 			if len(candidates) > 0 {
 				name = strconv.Itoa(candidates[0])
 			} else {
-				return nil, nil
+				name = nextSession
 			}
 		}
 		if name == "shell" || name == "sh" {
@@ -186,6 +205,9 @@ Loop:
 				if name == s.Name {
 					return s.Attach(id), nil
 				}
+			}
+			if name == nextSession {
+				return MakeSession(name, id), nil
 			}
 			ok, err := readYesNo("Create session %s [Y/N]? ", name)
 			switch {

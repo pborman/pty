@@ -67,6 +67,7 @@ func main() {
 	detach := getopt.BoolLong("detach", 0, "create and detach new shell, do not connect")
 	list := getopt.BoolLong("list", 0, "just list existing sessions")
 	autoAttach = getopt.BoolLong("auto", 0, "automatically attach to matching session")
+	createSession := getopt.BoolLong("create", 'c', "creatre session if not existing")
 	getopt.Parse()
 
 	if *list {
@@ -135,6 +136,13 @@ func main() {
 		session = MakeSession(args[0], *sessionID)
 
 		if !session.Check() {
+			if *createSession {
+				session = MakeSession(args[0], *sessionID)
+				if session.Check() {
+					exitf("session name already in use")
+				}
+				break
+			}
 			exitf("no such session %s", args[0])
 		}
 		if session.cnt == 0 {
