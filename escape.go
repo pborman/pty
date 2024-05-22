@@ -260,14 +260,20 @@ func (e *EscapeBuffer) sendEscapes(w io.Writer, alt bool) {
 		codes = append(codes, code)
 	}
 	sort.Strings(codes)
+	maxlen := 0
 	fmt.Fprintf(w, "-----\r\n")
+	for _, code := range codes {
+		if n := len(fmt.Sprintf("%q", code)); n > maxlen {
+			maxlen = n
+		}
+	}
 	for _, code := range codes {
 		if code == "" {
 			continue
 		}
 		seq := ansi.Table[ansi.Name(code)]
 		if seq != nil {
-			fmt.Fprintf(w, "Code: %q %s\r\n", code, seq.Name)
+			fmt.Fprintf(w, "Code: %-*q %s\r\n", maxlen, code, seq.Name)
 		} else {
 			fmt.Fprintf(w, "Code: %q\r\n", code)
 		}
