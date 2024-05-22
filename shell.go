@@ -107,12 +107,12 @@ func (m messageKind) String() string {
 const (
 	scasb   = "\033[?1049h" // save cursor, switch to alternate screen buffer
 	nsbrc   = "\033[?1049l" // switch to normal screen buffer, restore cursor
-	cls     = nsbrc + "\033[J\033[3J\033[J"
 	edb0    = "\033[J"  // Erase below
 	edb1    = "\033[0J" // Erase below
 	eda     = "\033[1J" // Erase above
 	edall   = "\033[2J" // Erase all
 	edsaved = "\033[3J" // Erase Saved Lines
+	cls     = nsbrc + edb0 + edsaved + edb0
 	home    = "\033[H"
 	sendSSH = "\033[z"
 )
