@@ -89,17 +89,16 @@ func (f *forwarder) session(c net.Conn, s *Session) error {
 		return err
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	done := make(chan struct{}, 1)
 	go func() {
 		io.Copy(c, rc)
-		wg.Done()
+		done <- struct{}{}
 	}()
 	go func() {
 		io.Copy(rc, c)
-		wg.Done()
+		done <- struct{}{}
 	}()
-	wg.Wait()
+	<-done
 	checkClose(rc)
 	return nil
 }
