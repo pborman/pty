@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 )
 
 // loopbackPair returns a client/server pair of raw TCP connections over the
@@ -284,6 +285,30 @@ func TestWriteDoesNotModifyCaller(t *testing.T) {
 	}
 	if !bytes.Equal(msg, orig) {
 		t.Error("Write modified the caller's buffer")
+	}
+}
+
+// TestHandshakeTimeout checks that a constructor gives up with ErrTimeout
+// when the peer never handshakes, and closes the underlying conn.
+func TestHandshakeTimeout(t *testing.T) {
+	oldTimeout := Timeout
+	Timeout = 50 * time.Millisecond
+	defer func() { Timeout = oldTimeout }()
+
+	rawClient, _ := loopbackPair(t) // server side never handshakes
+	start := time.Now()
+	conn, err := Client(rawClient, []byte("secret"))
+	if !errors.Is(err, ErrTimeout) {
+		t.Fatalf("got err %v, want ErrTimeout", err)
+	}
+	if conn != nil {
+		t.Error("got non-nil Conn from timed-out handshake")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("timeout took %v with Timeout=50ms", elapsed)
+	}
+	if _, err := rawClient.Write([]byte("x")); err == nil {
+		t.Error("underlying conn still open after timeout")
 	}
 }
 

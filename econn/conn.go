@@ -14,8 +14,8 @@
 // peer started with a different secret decrypts garbage at every step, so
 // its echo cannot match and the constructor returns ErrSecretMismatch.
 // Because the handshake is a round trip, Client and Server block until the
-// other end runs; construct the two ends in separate goroutines, and set a
-// deadline on the underlying conn beforehand to bound the wait.
+// other end runs or Timeout passes.  Timeout is a package global and should
+// only be changed in package main prior to using the econn package.
 //
 // The stream is encrypted but not authenticated (no MAC), so an active
 // attacker could flip bits in transit undetected. This matches its intended
@@ -42,9 +42,16 @@ const (
 	challengeSize = 32
 )
 
+// Timeout is how long to wait for the initial handshake.
+var Timeout = time.Minute * 5
+
+// ErrTimeout is returned by Client and Server when the handshake
+// does not complete within the Timeout.
+var ErrTimeout = errors.New("econn: handshake timed out")
+
 // ErrSecretMismatch is returned by Client and Server when the handshake
 // shows the peer was started with a different shared secret.
-var ErrSecretMismatch = errors.New("econn: handshake failed: peer does not share the secret")
+var ErrSecretMismatch = errors.New("econn: handshake failed: bad secret")
 
 // Conn is an encrypted connection over an underlying net.Conn. It implements
 // net.Conn. As with any net.Conn, one concurrent Read and one concurrent
@@ -83,6 +90,25 @@ func Server(c net.Conn, secret []byte) (*Conn, error) {
 }
 
 func newConn(c net.Conn, secret []byte, writeLabel, readLabel string) (*Conn, error) {
+	t := time.NewTimer(Timeout)
+	defer t.Stop()
+	ch := make(chan struct{})
+	var ec *Conn
+	var err error
+	go func() {
+		ec, err = newConn2(c, secret, writeLabel, readLabel)
+		close(ch)
+	}()
+	select {
+	case <-t.C:
+		c.Close()
+		return nil, ErrTimeout
+	case <-ch:
+		return ec, err
+	}
+}
+
+func newConn2(c net.Conn, secret []byte, writeLabel, readLabel string) (*Conn, error) {
 	writeBlock, err := aes.NewCipher(deriveKey(secret, writeLabel))
 	if err != nil {
 		panic("econn: " + err.Error())

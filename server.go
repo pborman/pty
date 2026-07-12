@@ -68,11 +68,13 @@ func (s *Session) shell(debug bool) {
 			s.Exitf("server: %v", err)
 		}
 		log.Infof("accepted new connection")
-		sc, err := econn.Server(c, s.secret[:])
-		if err != nil {
-			s.Exitf("server: %v", err)
-		}
 		go func() {
+			sc, err := econn.Server(c, s.secret[:])
+			if err != nil {
+				checkClose(c)
+				log.Warnf("server: %v", err)
+				return
+			}
 			shell.attach(sc)
 			checkClose(sc)
 		}()
