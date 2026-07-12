@@ -141,7 +141,7 @@ func (m *Mutex) Lock(who string) func() {
 		var owner string
 		m.imu.Lock()
 		{
-			owner = who
+			owner = m.owner
 			m.owner = ""
 		}
 		m.imu.Unlock()
