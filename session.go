@@ -15,6 +15,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -25,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pborman/pty/econn"
 	"github.com/pborman/pty/log"
 	"golang.org/x/crypto/ssh/terminal"
 )
@@ -34,11 +36,12 @@ import (
 // the Name and the path.  A server will call Listen on the session while a
 // client will call Dial on the session.
 type Session struct {
-	Name    string // Name of the session (client and server)
-	cnt     int    // Set by Check to the current number of clients
-	path    string // The directory for this session
-	spawn   bool   // respawn rather than execing a shell
-	started bool   // set true if we started the session
+	Name    string   // Name of the session (client and server)
+	cnt     int      // Set by Check to the current number of clients
+	path    string   // The directory for this session
+	spawn   bool     // respawn rather than execing a shell
+	started bool     // set true if we started the session
+	secret  [32]byte // shared secret
 
 	// Below are fields only used by a client
 	ostate *terminal.State
@@ -126,6 +129,12 @@ func (s *Session) Addr() string {
 	return ""
 }
 
+func (s *Session) GetSecret() error {
+	data, err := s.readfile("secret")
+	copy(s.secret[:], data)
+	return err
+}
+
 func (s *Session) TTYSize() string {
 	if data, err := s.readfile("ttysize"); err == nil {
 		return data
@@ -155,6 +164,10 @@ func (s *Session) SetTitle(title string) error {
 func (s *Session) SetAddr(addr string) error {
 	// s.addr = addr
 	return s.writefile("addr", addr)
+}
+
+func (s *Session) SetSecret() error {
+	return s.writefile("secret", string(s.secret[:]))
 }
 
 func (s *Session) SetTTYSize(rows, cols int) error {
@@ -204,10 +217,20 @@ func (s *Session) Dial() (net.Conn, error) {
 		return nil, err
 	}
 	log.Infof("Dialing %s @ %v", s.Name, addr)
-	return net.DialTCP("tcp", nil, addr)
+	c, err := net.DialTCP("tcp", nil, addr)
+	// If GetSecret fails then fall back to the old
+	// unencrypted version.
+	if err != nil || s.GetSecret() != nil {
+		return c, err
+	}
+	return econn.Client(c, s.secret[:])
 }
 
 func (s *Session) Listen() (net.Listener, error) {
+	if _, err := rand.Read(s.secret[:]); err != nil {
+		return nil, fmt.Errorf("failed to create secret: %w", err)
+	}
+	s.SetSecret()
 	addr := &net.TCPAddr{
 		IP: net.IPv4(127, 0, 0, 1),
 	}

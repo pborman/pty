@@ -26,6 +26,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/pborman/pty/econn"
 	"github.com/pborman/pty/log"
 	"github.com/pborman/pty/mutex"
 )
@@ -67,9 +68,13 @@ func (s *Session) shell(debug bool) {
 			s.Exitf("server: %v", err)
 		}
 		log.Infof("accepted new connection")
+		sc, err := econn.Server(c, s.secret[:])
+		if err != nil {
+			s.Exitf("server: %v", err)
+		}
 		go func() {
-			shell.attach(c)
-			checkClose(c)
+			shell.attach(sc)
+			checkClose(sc)
 		}()
 	}
 }
