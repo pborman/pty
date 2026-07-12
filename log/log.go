@@ -111,7 +111,7 @@ func NewLogger(path string) (*Logger, error) {
 			log.mu.Lock()
 			path = filepath.Dir(log.path)
 			log.mu.Unlock()
-			log.prune(filepath.Dir(path))
+			log.prune(path)
 		}
 	}()
 	return log, nil
