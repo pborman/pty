@@ -362,7 +362,9 @@ var (
 )
 
 func ps(w *MessengerWriter) []byte {
-	psChan = make(chan []byte)
+	// Don't let clientCommand hang if psMessage comes in
+	// after our 15 second timeout.
+	psChan = make(chan []byte, 1)
 	w.Send(psMessage, nil)
 	select {
 	case data := <-psChan:
