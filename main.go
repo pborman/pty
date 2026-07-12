@@ -86,6 +86,10 @@ func main() {
 
 	// If internal is set then we are being called from spawSession.
 	if *internal != "" {
+		if !ValidSessionName(*internal) {
+			exitf("invalid session name %q", *newSession)
+		}
+
 		session := MakeSession(*internal, *sessionID)
 		log.Init(session.path + "/log/server")
 		log.TakeStderr()
@@ -114,6 +118,10 @@ func main() {
 	var session *Session
 	switch {
 	case *newSession != "":
+		if !ValidSessionName(*newSession) {
+			exitf("invalid session name %q", *newSession)
+		}
+
 		session = MakeSession(*newSession, *sessionID)
 		if session.Check() {
 			exitf("session name already in use")
