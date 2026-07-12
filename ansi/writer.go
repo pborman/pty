@@ -127,7 +127,7 @@ func (w *Writer) Write(in []byte) (int, error) {
 		in = append(modes, in...)
 	}
 	n, err := p.w.Write(in)
-	n -= nin
+	n -= len(in) - nin
 	if n < 0 {
 		return 0, err
 	}
