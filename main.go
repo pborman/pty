@@ -456,7 +456,7 @@ func quoteShell(s string) string {
 	fmt.Fprintf(&buf, `"`)
 	for _, c := range s {
 		switch c {
-		case '"', '\\', '$':
+		case '"', '\\', '$', '`':
 			fmt.Fprintf(&buf, `\%c`, c)
 		default:
 			fmt.Fprintf(&buf, `%c`, c)
