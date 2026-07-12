@@ -121,11 +121,17 @@ func (w *Writer) Write(in []byte) (int, error) {
 		modes = append(modes, itoa(bg)...)
 		p.bg = bg
 	}
+	nin := len(in)
 	if len(modes) > 0 {
 		modes = append(append([]byte{'\033', '['}, modes...), 'm')
 		in = append(modes, in...)
 	}
-	return p.w.Write(in)
+	n, err := p.w.Write(in)
+	n -= nin
+	if n < 0 {
+		return 0, err
+	}
+	return n, err
 }
 
 // WriteString writes in to w, prefixing it with an SGR escape sequence, if
