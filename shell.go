@@ -467,9 +467,13 @@ func (s *Shell) Exit() {
 		return
 	}
 	s.exiting = true
-	clients := s.clients
+	var clients []*Client
+	for c := range s.clients {
+		clients = append(clients, c)
+	}
+
 	unlock()
-	for c := range clients {
+	for _, c := range clients {
 		// Perhaps this should be locked.
 		if s.eb.inalt {
 			c.Output([]byte(nsbrc))
