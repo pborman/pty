@@ -41,6 +41,10 @@ func (m *MessengerWriter) Close() error {
 }
 
 func (m *MessengerWriter) Write(buf []byte) (int, error) {
+	defer m.mu.Lock("Write")()
+	return m.write(buf)
+}
+func (m *MessengerWriter) write(buf []byte) (int, error) {
 	x := bytes.IndexByte(buf, 0)
 	cnt := 0
 	for x >= 0 {
@@ -230,7 +234,7 @@ func (m *MessengerReader) fill(count int) bool {
 		if count > cap(m.message) {
 			// We can't fit in the message buffer, so
 			// reallocate, rounding up to a 4K buffer size.
-			nm := make([]byte, (count+0x1000)&0xfff)
+			nm := make([]byte, (count+0x1000)&^^0xfff)
 			m.mt = copy(nm, m.message[:m.mt-m.mh])
 			m.mh = 0
 			m.message = nm
