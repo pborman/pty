@@ -402,7 +402,8 @@ func clientCommand(w *MessengerWriter, kind messageKind, data []byte, ready chan
 			close(psChan)
 		}
 	case ackMessage:
-		ackerMu.Unlock()
+		ackerMu.Lock()
+		defer ackerMu.Unlock()
 		var key [16]byte
 		copy(key[:], data)
 		if ch := ackers[key]; ch != nil {
