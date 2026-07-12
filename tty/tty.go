@@ -81,7 +81,7 @@ func File(tty *os.File) (string, error) {
 	}
 	sys, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
-		return "", fmt.Errorf("unsupported sys stat type %T", sys)
+		return "", fmt.Errorf("unsupported sys stat type %T", fi.Sys())
 	}
 	for _, dir := range ttydirs {
 		name, _ := searchDir(dir, sys)
