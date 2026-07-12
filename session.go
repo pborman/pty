@@ -45,7 +45,7 @@ type Session struct {
 	tilde  byte
 }
 
-const validBytes = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-.+!=:[]<>{}"
+const validBytes = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-.+!=:[]<>{} "
 
 func ValidSessionName(name string) bool {
 	if name == "log" {

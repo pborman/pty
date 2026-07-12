@@ -27,7 +27,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kr/pty"
+	"github.com/creack/pty"
 	"github.com/pborman/pty/log"
 	"github.com/pborman/pty/mutex"
 )
@@ -107,11 +107,11 @@ func (m messageKind) String() string {
 const (
 	scasb   = "\033[?1049h" // save cursor, switch to alternate screen buffer
 	nsbrc   = "\033[?1049l" // switch to normal screen buffer, restore cursor
-	edb0    = "\033[J"  // Erase below
-	edb1    = "\033[0J" // Erase below
-	eda     = "\033[1J" // Erase above
-	edall   = "\033[2J" // Erase all
-	edsaved = "\033[3J" // Erase Saved Lines
+	edb0    = "\033[J"      // Erase below
+	edb1    = "\033[0J"     // Erase below
+	eda     = "\033[1J"     // Erase above
+	edall   = "\033[2J"     // Erase all
+	edsaved = "\033[3J"     // Erase Saved Lines
 	cls     = nsbrc + edb0 + edsaved + edb0
 	home    = "\033[H"
 	sendSSH = "\033[z"
@@ -150,6 +150,7 @@ type Shell struct {
 	Env        []string
 	cmd        *exec.Cmd
 	pty        *os.File
+	tty        *os.File // master side
 	session    *Session
 	started    chan struct{}
 	done       chan struct{}
@@ -365,7 +366,6 @@ func (s *Shell) runout() {
 				s.wg.Wait()
 				unlock = s.mu.Lock("runout2")
 				close(s.done)
-				unlock()
 				return true
 			}
 			return false
@@ -402,28 +402,52 @@ func (s *Shell) Start(debug bool) error {
 		s.cmd.Args = s.Args
 		s.cmd.Env = s.Env
 	}
-
-	fd, tty, err := pty.Open()
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		checkClose(tty)
-	}()
-	s.cmd.Stdout = tty
-	s.cmd.Stdin = tty
-	s.cmd.Stderr = tty
 	s.cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid:  true,
 		Setctty: true,
 	}
-	err = s.cmd.Start()
+
+	if false {
+		fd, tty, err := pty.Open()
+		if err != nil {
+			return err
+		}
+		ws := pty.Winsize{Rows: 24, Cols: 80}
+		if err := pty.Setsize(fd, &ws); err != nil {
+			log.Infof("Setsize failed (non-fatal on some macOS setups): %v", err)
+		}
+	/*
+		// This does not return an error but pty.Setsize still fails.
+		if err := GrantPT(fd.Fd()); err != nil {
+			log.Infof("GrantPT of fd.Fd(): %v", err)
+		}
+		if err := GrantPT(tty.Fd()); err != nil {
+			log.Infof("GrantPT of tty.Fd(): %v", err)
+		}
+	*/
+
+		defer func() {
+			checkClose(tty)
+		}()
+		s.cmd.Stdout = tty
+		s.cmd.Stdin = tty
+		s.cmd.Stderr = tty
+		err = s.cmd.Start()
+		if err != nil {
+			log.Infof("Command failed to start: %v", err)
+			checkClose(fd)
+			return err
+		}
+		s.pty = fd
+		s.tty = tty
+	}
+	ptmx, err := pty.StartWithAttrs(s.cmd, nil, s.cmd.SysProcAttr)
 	if err != nil {
-		checkClose(fd)
+		log.Infof("Command failed to start: %v", err)
+		checkClose(ptmx)
 		return err
 	}
-	s.pty = fd
+	s.pty = ptmx
 
 	// Give the shell a chance to change the tty settings
 	time.Sleep(time.Second / 10)
@@ -474,5 +498,12 @@ func (s *Shell) List(me *Client) {
 }
 
 func (s *Shell) Setsize(rows, cols int) error {
-	return setsize(s.pty, rows, cols)
+	if err := pty.Setsize(s.pty, &pty.Winsize{
+		Rows: uint16(rows),
+		Cols: uint16(cols),
+	}); err != nil {
+		return fmt.Errorf("Setsize on pty returned: %v", err)
+	}
+	return nil
+	// return setsize(s.pty, rows, cols)
 }

@@ -27,7 +27,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kr/pty"
+	"github.com/creack/pty"
 	"github.com/pborman/getopt"
 	"github.com/pborman/pty/log"
 	"github.com/pborman/pty/mutex"
@@ -67,7 +67,8 @@ func main() {
 	detach := getopt.BoolLong("detach", 0, "create and detach new shell, do not connect")
 	list := getopt.BoolLong("list", 0, "just list existing sessions")
 	autoAttach = getopt.BoolLong("auto", 0, "automatically attach to matching session")
-	createSession := getopt.BoolLong("create", 'c', "creatre session if not existing")
+	createSession := getopt.BoolLong("create", 'c', "create session if not existing")
+	grok := getopt.BoolLong("grok", 0, "grok input mapping")
 	getopt.Parse()
 
 	if *list {
@@ -289,10 +290,18 @@ func main() {
 			}
 		}
 		if n > 0 {
-			_, err2 := w.Write(buf[:n])
+			input := buf[:n]
+			if *grok {
+				input = bytes.ReplaceAll(input, []byte{0x7f}, []byte{0x08})
+			}
+			_, err2 := w.Write(input)
 			if err == nil {
 				err = err2
 			}
+		}
+		if err != nil {
+			log.Infof("Exiting on error %v", err)
+			exit(0)
 		}
 		if cmd != 0 {
 			log.Infof("request command %q", cmd)

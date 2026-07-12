@@ -27,7 +27,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/kr/pty"
+	"github.com/creack/pty"
 )
 
 const (

@@ -27,9 +27,12 @@ type SCName int
 
 // Known names for sysconf
 const (
+/*
 	SCArgMax                     = SCName(C._SC_ARG_MAX)
 	SCChildMax                   = SCName(C._SC_CHILD_MAX)
+*/
 	SCClkTck                     = SCName(C._SC_CLK_TCK)
+/*
 	SCNgroupsMax                 = SCName(C._SC_NGROUPS_MAX)
 	SCOpenMax                    = SCName(C._SC_OPEN_MAX)
 	SCStreamMax                  = SCName(C._SC_STREAM_MAX)
@@ -242,4 +245,5 @@ const (
 	SCXopenStreams               = SCName(C._SC_XOPEN_STREAMS)
 	SCThreadRobustPrioInherit    = SCName(C._SC_THREAD_ROBUST_PRIO_INHERIT)
 	SCThreadRobustPrioProtect    = SCName(C._SC_THREAD_ROBUST_PRIO_PROTECT)
+*/
 )
