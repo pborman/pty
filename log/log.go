@@ -121,7 +121,7 @@ func TakeStderr() {
 	if f, ok := logger.fd.(*os.File); ok {
 		Infof("Taking over stderr")
 		syscall.Dup2(int(f.Fd()), 2)
-		fmt.Fprintf(os.Stderr, "Took over stderr")
+		fmt.Fprintf(os.Stderr, "Took over stderr\n")
 	} else {
 		Infof("Failed to take over stderr")
 	}
