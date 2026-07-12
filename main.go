@@ -342,17 +342,15 @@ func main() {
 			log.Errorf("client read from stdin(%d): %v", os.Stdin.Fd(), rerr)
 			ecnt++
 			if ecnt > 10 {
-				break
+				if !strings.Contains(rerr.Error(), "broken pipe") {
+					exitf("%v", rerr)
+				}
+				exit(0)
 			}
 		} else {
 			ecnt = 0
 		}
 	}
-
-	if !strings.Contains(err.Error(), "broken pipe") {
-		exitf("%v", err)
-	}
-	exit(0)
 }
 
 var (
