@@ -87,7 +87,7 @@ func main() {
 	// If internal is set then we are being called from spawSession.
 	if *internal != "" {
 		if !ValidSessionName(*internal) {
-			exitf("invalid session name %q", *newSession)
+			exitf("invalid session name %q", *internal)
 		}
 
 		session := MakeSession(*internal, *sessionID)
