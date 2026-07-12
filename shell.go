@@ -416,15 +416,15 @@ func (s *Shell) Start(debug bool) error {
 		if err := pty.Setsize(fd, &ws); err != nil {
 			log.Infof("Setsize failed (non-fatal on some macOS setups): %v", err)
 		}
-	/*
-		// This does not return an error but pty.Setsize still fails.
-		if err := GrantPT(fd.Fd()); err != nil {
-			log.Infof("GrantPT of fd.Fd(): %v", err)
-		}
-		if err := GrantPT(tty.Fd()); err != nil {
-			log.Infof("GrantPT of tty.Fd(): %v", err)
-		}
-	*/
+		/*
+			// This does not return an error but pty.Setsize still fails.
+			if err := GrantPT(fd.Fd()); err != nil {
+				log.Infof("GrantPT of fd.Fd(): %v", err)
+			}
+			if err := GrantPT(tty.Fd()); err != nil {
+				log.Infof("GrantPT of tty.Fd(): %v", err)
+			}
+		*/
 
 		defer func() {
 			checkClose(tty)

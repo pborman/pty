@@ -93,7 +93,7 @@ func SelectSession(id string) (*Session, error) {
 		return true
 	}
 	for i := 1; !sessionAvailable(i); i++ {
-		;
+
 	}
 
 	if len(sessions) == 0 {
@@ -109,7 +109,7 @@ func SelectSession(id string) (*Session, error) {
 		if loginShell != "" && (name == "shell" || name == "sh") {
 			execsh()
 		}
-		if (name == "") {
+		if name == "" {
 			name = nextSession
 		}
 		if !ValidSessionName(name) {
