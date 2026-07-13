@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/pborman/getopt"
+	"github.com/pborman/options"
 	"github.com/pborman/pty/log"
 	"github.com/pborman/pty/mutex"
 	"github.com/pborman/pty/parse"
@@ -36,7 +36,24 @@ import (
 )
 
 var pprofFd *os.File
-var autoAttach *bool
+
+// opts holds the command line options.
+var opts = struct {
+	Internal      string `getopt:"--internal       internal only flag"`
+	InternalDebug string `getopt:"--internal_debug internal only flag"`
+	Escape        string `getopt:"--escape -e=CHAR escape character"`
+	ID            string `getopt:"--id=ID          originating ID (TERM_SESSION_ID)"`
+	New           string `getopt:"--new=NAME       create new session named NAME"`
+	Debug         bool   `getopt:"--debug          debug mode, leave server in foreground"`
+	DebugServer   bool   `getopt:"--debug_server   enable server debugging"`
+	Detach        bool   `getopt:"--detach         create and detach new shell, do not connect"`
+	List          bool   `getopt:"--list           just list existing sessions"`
+	Auto          bool   `getopt:"--auto           automatically attach to matching session"`
+	Create        bool   `getopt:"--create -c      create session if not existing"`
+	Grok          bool   `getopt:"--grok           grok input mapping"`
+}{
+	Escape: "^P",
+}
 
 func main() {
 	os.Setenv("GORACE", "log_path=/tmp/cloud_race")
@@ -56,22 +73,9 @@ func main() {
 		exitf("reading configuration file: %v", err)
 	}
 
-	internal := getopt.StringLong("internal", 0, "", "internal only flag")
-	internalDebug := getopt.StringLong("internal_debug", 0, "", "internal only flag")
+	args := options.RegisterAndParse(&opts)
 
-	echar := getopt.StringLong("escape", 'e', "^P", "escape character")
-	sessionID := getopt.StringLong("id", 0, "", "originating ID (TERM_SESSION_ID)")
-	newSession := getopt.StringLong("new", 0, "", "create new session named NAME", "NAME")
-	debugFlag := getopt.BoolLong("debug", 0, "debug mode, leave server in foreground")
-	debugServer := getopt.BoolLong("debug_server", 0, "enable server debugging")
-	detach := getopt.BoolLong("detach", 0, "create and detach new shell, do not connect")
-	list := getopt.BoolLong("list", 0, "just list existing sessions")
-	autoAttach = getopt.BoolLong("auto", 0, "automatically attach to matching session")
-	createSession := getopt.BoolLong("create", 'c', "create session if not existing")
-	grok := getopt.BoolLong("grok", 0, "grok input mapping")
-	getopt.Parse()
-
-	if *list {
+	if opts.List {
 		sis := GetSessions()
 		fmt.Printf("Found %d sessions:\n", len(sis))
 		for _, si := range sis {
@@ -85,49 +89,48 @@ func main() {
 	}
 
 	// If internal is set then we are being called from spawSession.
-	if *internal != "" {
-		if !ValidSessionName(*internal) {
-			exitf("invalid session name %q", *internal)
+	if opts.Internal != "" {
+		if !ValidSessionName(opts.Internal) {
+			exitf("invalid session name %q", opts.Internal)
 		}
 
-		session := MakeSession(*internal, *sessionID)
+		session := MakeSession(opts.Internal, opts.ID)
 		log.Init(session.path + "/log/server")
 		log.TakeStderr()
-		session.run(*internalDebug)
+		session.run(opts.InternalDebug)
 		return
 	}
 
-	args := getopt.Args()
 	switch len(args) {
 	case 0:
 	case 1:
-		if *newSession != "" {
-			getopt.PrintUsage(os.Stderr)
+		if opts.New != "" {
+			options.PrintUsage(os.Stderr)
 			os.Exit(1)
 		}
 	default:
-		getopt.PrintUsage(os.Stderr)
+		options.PrintUsage(os.Stderr)
 		os.Exit(1)
 	}
 
-	tilde, ok := parseEscapeChar(*echar)
+	tilde, ok := parseEscapeChar(opts.Escape)
 	if !ok {
-		exitf("invalid escape character: %q", *echar)
+		exitf("invalid escape character: %q", opts.Escape)
 	}
 
 	var session *Session
 	switch {
-	case *newSession != "":
-		if !ValidSessionName(*newSession) {
-			exitf("invalid session name %q", *newSession)
+	case opts.New != "":
+		if !ValidSessionName(opts.New) {
+			exitf("invalid session name %q", opts.New)
 		}
 
-		session = MakeSession(*newSession, *sessionID)
+		session = MakeSession(opts.New, opts.ID)
 		if session.Check() {
 			exitf("session name already in use")
 		}
 	case len(args) == 0:
-		session, err = SelectSession(*sessionID)
+		session, err = SelectSession(opts.ID)
 		switch err {
 		case nil:
 		case io.EOF:
@@ -142,11 +145,11 @@ func main() {
 		if !ValidSessionName(args[0]) {
 			exitf("invalid session name %q", args[0])
 		}
-		session = MakeSession(args[0], *sessionID)
+		session = MakeSession(args[0], opts.ID)
 
 		if !session.Check() {
-			if *createSession {
-				session = MakeSession(args[0], *sessionID)
+			if opts.Create {
+				session = MakeSession(args[0], opts.ID)
 				if session.Check() {
 					exitf("session name already in use")
 				}
@@ -172,12 +175,12 @@ func main() {
 
 	if !session.Ping() {
 		var debugFile string
-		if *debugServer {
+		if opts.DebugServer {
 			debugFile = session.DebugPath()
 		}
 
-		session.Spawn(debugFile, *debugFlag)
-		if *detach {
+		session.Spawn(debugFile, opts.Debug)
+		if opts.Detach {
 			return
 		}
 		// Give the new shell a chance to start up.
@@ -299,7 +302,7 @@ func main() {
 		}
 		if n > 0 {
 			input := buf[:n]
-			if *grok {
+			if opts.Grok {
 				input = bytes.ReplaceAll(input, []byte{0x7f}, []byte{0x08})
 			}
 			_, err2 := w.Write(input)

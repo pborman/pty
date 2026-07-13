@@ -124,7 +124,7 @@ func SelectSession(id string) (*Session, error) {
 	if loginShell != "" {
 		fmt.Printf("shell) Spawn %s\n", loginShell)
 	}
-	if *autoAttach {
+	if opts.Auto {
 		if id != "" {
 			for _, s := range sessions {
 				if s.cnt == 0 && s.SessionID() == id {
