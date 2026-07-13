@@ -150,6 +150,9 @@ func (s *Shell) attach(c net.Conn) {
 				client.SetName(name)
 			case dumpMessage:
 				log.DumpGoroutines()
+				var buf bytes.Buffer
+				mutex.Dump(&buf)
+				log.Infof("%s\n", buf.String())
 			case listMessage:
 				s.List(client)
 			case ttysizeMessage:

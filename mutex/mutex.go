@@ -170,15 +170,19 @@ func Dump(w io.Writer) {
 	for _, m := range list {
 		// Don't lock m, we are looking for mutecies that are currently
 		// locked with potentially waiting callers.
-		if m.owner != "" {
-			fmt.Fprintf(w, "mutex %s is locked by %s\n", m.name, m.owner)
-		} else if len(m.waiting) != 0 {
-			// This really should never happen.
-			fmt.Fprintf(w, "mutex %s is idle\n", m.name)
-		}
-		for name := range m.waiting {
-			fmt.Fprintf(w, "   %s waiting\n", name)
-		}
+		func() {
+			m.imu.Lock()
+			defer m.imu.Unlock()
+			if m.owner != "" {
+				fmt.Fprintf(w, "mutex %s is locked by %s\n", m.name, m.owner)
+			} else if len(m.waiting) != 0 {
+				// This really should never happen.
+				fmt.Fprintf(w, "mutex %s is idle\n", m.name)
+			}
+			for name := range m.waiting {
+				fmt.Fprintf(w, "   %s waiting\n", name)
+			}
+		}()
 	}
 }
 
