@@ -216,17 +216,19 @@ func (bp *Reader) next() S {
 	// Set c to the escape code (byte after escape or decoded C1 byte).
 	// Set h to be byte byte after the escape code.
 	var c byte
+	var esl int // escape sequence length
 	if bp.buf[bp.b] == escape {
 		if err := bp.fill(2); err != nil {
 			bp.h = bp.t
 			return S{Text: sescape, Code: sescape, Type: "ESC", Error: LoneEscape}
 		}
 		c = bp.buf[bp.b+1]
-		bp.h = bp.b + 2
+		esl = 2
 	} else {
+		esl = 1
 		c = flipCode(bp.buf[bp.b])
-		bp.h = bp.b + 1
 	}
+	bp.h = bp.b + esl
 
 	// code is the expanded escape code (e.g., 0x9b becomes ESC [)
 	code := bp.code()
@@ -241,7 +243,7 @@ func (bp *Reader) next() S {
 		return S{Text: txt, Code: code, Type: "CS", Error: FoundST}
 	default:
 		// Need to find the trailing ST
-		return bp.findST(code)
+		return bp.findST(code, esl)
 	}
 
 	// buf[h] is the byte after the entry sequence (b+1 or b+2)
@@ -421,18 +423,18 @@ func (bp *Reader) code() Name {
 	return Name(bp.buf[bp.b : bp.b+2])
 }
 
-func (bp *Reader) findST(code Name) S {
+func (bp *Reader) findST(code Name, esl int) S {
 	for {
 		// It seems xterm allows terminating with a BEL
 		if err := bp.fill(1); err != nil {
 			txt := bp.text(bp.t)
-			return S{Text: txt, Code: code, Params: []string{txt[2:]}, Type: "CS", Error: NoST}
+			return S{Text: txt, Code: code, Params: []string{txt[esl:]}, Type: "CS", Error: NoST}
 		}
 		switch bp.buf[bp.h] {
 		case escape:
 		case bell, st1:
 			txt := bp.text(bp.h + 1)
-			return S{Text: txt, Code: code, Params: []string{txt[2:]}, Type: "CS"}
+			return S{Text: txt, Code: code, Params: []string{txt[esl:]}, Type: "CS"}
 		default:
 			bp.h++
 			continue
@@ -441,15 +443,15 @@ func (bp *Reader) findST(code Name) S {
 		// We have seen an escape. We need another byte.
 		if err := bp.fill(2); err != nil {
 			txt := bp.text(bp.t)
-			return S{Text: txt, Code: code, Params: []string{txt[2:]}, Type: "CS", Error: NoST}
+			return S{Text: txt, Code: code, Params: []string{txt[esl:]}, Type: "CS", Error: NoST}
 		}
 		switch bp.buf[bp.h+1] {
 		case 'X': // SOS
 			txt := bp.text(bp.h)
-			return S{Text: txt, Code: code, Params: []string{txt[2:]}, Type: "CS", Error: FoundSOS}
+			return S{Text: txt, Code: code, Params: []string{txt[esl:]}, Type: "CS", Error: FoundSOS}
 		case '\\': // ST
 			txt := bp.text(bp.h + 2)
-			return S{Text: txt, Code: code, Params: []string{txt[2:]}, Type: "CS"}
+			return S{Text: txt, Code: code, Params: []string{txt[esl:]}, Type: "CS"}
 		default:
 			bp.h++
 		}
