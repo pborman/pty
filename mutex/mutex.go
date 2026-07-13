@@ -74,7 +74,7 @@ var (
 	mu        sync.Mutex
 	list      []*Mutex // A list of all the mutexes ever created.
 	index     int      // to make all mutex names unique
-	underTest = func(string) {}
+	underTest func(string)
 	debug     = false
 	once      sync.Once
 	logger    = log.Outputf
