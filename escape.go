@@ -134,20 +134,19 @@ func (e *EscapeBuffer) Flush() {
 	}
 }
 
+func (e *EscapeBuffer) add(buf []byte) {
+	if e.inalt {
+		e.alt = appendto(e.alt, buf)
+	} else {
+		e.normal = appendto(e.normal, buf)
+	}
+}
+
 func (e *EscapeBuffer) Write(buf []byte) (int, error) {
 	n := len(buf)
 
-	add := func(buf []byte) {
-		e.normal = appendto(e.normal, buf)
-	}
-	if e.inalt {
-		add = func(buf []byte) {
-			e.alt = appendto(e.alt, buf)
-		}
-	}
-
 	if e.firstBytes == "" {
-		add(buf)
+		e.add(buf)
 		return n, nil
 	}
 	// If e.partial has length then its cap is how many bytes we
@@ -189,17 +188,17 @@ Loop:
 			e.inseq.seen = append(e.inseq.seen, buf[:x]...)
 			x += len(e.inseq.term)
 			if e.inseq.callback(e, e.inseq.seen) {
-				add(e.inseq.seen)
+				e.add(e.inseq.seen)
 			}
 			e.inseq = nil
 		}
 
 		x := bytes.IndexAny(buf, e.firstBytes)
 		if x < 0 {
-			add(buf)
+			e.add(buf)
 			return n, nil
 		}
-		add(buf[:x])
+		e.add(buf[:x])
 		buf = buf[x:]
 		maxPartial := 0
 		e.partial = nil
@@ -210,7 +209,7 @@ Loop:
 						seq := s
 						e.inseq = &seq
 					} else if s.callback(e, nil) {
-						add(s.seq)
+						e.add(s.seq)
 					}
 					buf = buf[len(s.seq):]
 					continue Loop
@@ -233,7 +232,7 @@ Loop:
 			copy(e.partial, buf)
 			return n, nil
 		}
-		add(buf[:1])
+		e.add(buf[:1])
 		buf = buf[1:]
 	}
 }
