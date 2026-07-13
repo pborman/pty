@@ -230,7 +230,9 @@ func (s *Session) Listen() (net.Listener, error) {
 	if _, err := rand.Read(s.secret[:]); err != nil {
 		return nil, fmt.Errorf("failed to create secret: %w", err)
 	}
-	s.SetSecret()
+	if err := s.SetSecret(); err != nil {
+		return nil, fmt.Errorf("failed to write secret: %w", err)
+	}
 	addr := &net.TCPAddr{
 		IP: net.IPv4(127, 0, 0, 1),
 	}
