@@ -152,7 +152,7 @@ func (r *Reader) readWord() (string, rune, error) {
 		case c == '\\':
 			c, _, err = r.r.ReadRune()
 			if err == io.EOF {
-				word.WriteRune(c)
+				word.WriteRune('\\')
 				return word.String(), 0, nil
 			}
 			if err != nil {
