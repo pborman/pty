@@ -86,7 +86,7 @@ func printProc(w io.Writer, p *pspkg.Process, prefix string) {
 	switch name {
 	case "pty":
 		fmt.Fprintf(w, "%s pty %d (%s)\n", prefix, p.Pid(), wd)
-	case "vi", "vi.exe", "vim", "nvim":
+	case "vi", "vi.exe", "vim", "nvim", "govi":
 		fmt.Fprintf(w, "%svi %s (%s)\n", prefix, viFiles(argv, processFiles(p)), wd)
 	default:
 		if len(argv) == 0 {
