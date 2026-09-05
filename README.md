@@ -1,6 +1,6 @@
 # pty
 
-I wrote this mainly for personal use for working on linux machines from my macOS desktop.  Github is a convenient way to import it on my corporate appliance.  As this is a personal project it has some areas that might be a little messy and is very short on godoc comments.  pty is only supported on Linux as it utilizes /proc.
+I wrote this mainly for personal use for working on linux machines from my macOS desktop.  Github is a convenient way to import it on my corporate appliance.  As this is a personal project it has some areas that might be a little messy and is very short on godoc comments.  pty is supporte on Linux and macOS.
 
 Typical invocation: ```ssh -t remotehost path-to-pty```
 
