@@ -5,6 +5,7 @@ go 1.21
 require (
 	github.com/creack/pty v1.1.24
 	github.com/pborman/options v1.5.0
+	github.com/pborman/ps v0.3.0
 	golang.org/x/crypto v0.8.0
 	gopkg.in/yaml.v2 v2.4.0
 )

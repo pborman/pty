@@ -57,6 +57,8 @@ github.com/pborman/getopt/v2 v2.0.0-20200816005738-fd0d075bf4de h1:i3rei6KlOqwCd
 github.com/pborman/getopt/v2 v2.0.0-20200816005738-fd0d075bf4de/go.mod h1:4NtW75ny4eBw9fO1bhtNdYTlZKYX5/tBLtsOpwKIKd0=
 github.com/pborman/options v1.5.0 h1:0+273Poh6LRkTrSmRi99bofpeETaNdcb7f1RARMGXW8=
 github.com/pborman/options v1.5.0/go.mod h1:so9gtr58Vvv0CVEhPyJagkyz8//wm/xYAf6JYca1TvI=
+github.com/pborman/ps v0.3.0 h1:RC1Aboc2TKhcg1kiYU6AkJQX97w1qY7VY6u4eAm2ih0=
+github.com/pborman/ps v0.3.0/go.mod h1:QVSAL5/ZUZ1j5ZIba2ryOSyKeeOf1zZ7Ei7AyrA+yBw=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:xMI15A0UPsDsEKsMN9yxemIoYk6Tm2C1GtYGdfGttqA=
 github.com/protocolbuffers/txtpbfmt v0.0.0-20220608084003-fc78c767cd6a/go.mod h1:KjY0wibdYKc4DYkerHSbguaf3JeIPGhNJBp2BNiFH78=

@@ -15,12 +15,9 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/pborman/pty/proc"
 )
 
 func TestSanePath(t *testing.T) {
@@ -33,61 +30,53 @@ func TestSanePath(t *testing.T) {
 	}
 }
 
-func TestViFilesAndPrintProc(t *testing.T) {
+func TestViFiles(t *testing.T) {
 	home := user.HomeDir
-	p := &proc.Process{
-		Pid:  42,
-		Name: "vi",
-		Argv: []string{"vi", "-n", home + "/file.go", "other"},
-		WD:   home + "/src",
-		Files: []string{
-			"/dev/tty",
-			"/tmp/vi.foo",
-			"/var/tmp/vi.recover/x",
-			"relative",
-			"/etc/passwd",
-			home + "/notes",
-		},
+	argv := []string{"vi", "-n", home + "/file.go", "other"}
+	files := []string{
+		"/dev/tty",
+		"/private/dev/null",
+		"/tmp/vi.foo",
+		"/private/tmp/vi.bar",
+		"/var/tmp/vi.recover/x",
+		"/private/var/tmp/vi.recover/y",
+		home + "/.vim/swap/file.go.swp",
+		"relative",
+		"/etc/passwd",
+		home + "/notes",
 	}
-	files := viFiles(p)
-	joined := strings.Join(files, ",")
+	got := viFiles(argv, files)
+	joined := strings.Join(got, ",")
 	if !strings.Contains(joined, "file.go") || !strings.Contains(joined, "other") {
-		t.Errorf("argv files missing: %q", files)
+		t.Errorf("argv files missing: %q", got)
 	}
 	if !strings.Contains(joined, "/etc/passwd") {
-		t.Errorf("regular file missing: %q", files)
+		t.Errorf("regular file missing: %q", got)
 	}
-	if strings.Contains(joined, "/dev/tty") || strings.Contains(joined, "/tmp/vi.") {
-		t.Errorf("filtered files present: %q", files)
+	if !strings.Contains(joined, "notes") {
+		t.Errorf("home file missing: %q", got)
 	}
-
-	var buf bytes.Buffer
-	printProc(&buf, p, "")
-	if !strings.Contains(buf.String(), "vi") {
-		t.Errorf("print vi = %q", buf.String())
-	}
-
-	ptyProc := &proc.Process{Pid: 1, Name: "pty", WD: home, Argv: []string{"pty"}}
-	child := &proc.Process{Pid: 2, Name: "ksh", WD: "/tmp", Argv: []string{"-ksh"}}
-	ptyProc.Children = []*proc.Process{child}
-	buf.Reset()
-	printProc(&buf, ptyProc, "")
-	if !strings.Contains(buf.String(), "pty 1") {
-		t.Errorf("print pty = %q", buf.String())
-	}
-	if !strings.Contains(buf.String(), "-ksh") {
-		t.Errorf("print child = %q", buf.String())
+	for _, skip := range []string{"/dev/tty", "/private/dev", "/tmp/vi.", "/private/tmp/vi.", "vi.recover", ".vim/swap", "relative"} {
+		if strings.Contains(joined, skip) {
+			t.Errorf("filtered path %q present in %q", skip, got)
+		}
 	}
 }
 
 func TestPSMissing(t *testing.T) {
-	// Force the process tree to be built. On systems without /proc this
-	// returns the error string; with /proc a missing pid is "process not found".
 	got := PS(-1)
 	if got == "" {
 		t.Error("PS(-1) returned empty")
 	}
-	if os.Getenv("FORCE") == "never" {
+	if got != "process not found" && !strings.Contains(got, "process not found") {
 		t.Log(got)
 	}
+}
+
+func TestPSSelf(t *testing.T) {
+	got := PS(os.Getpid())
+	if got == "process not found" || got == "" {
+		t.Fatalf("PS(self) = %q", got)
+	}
+	t.Log(got)
 }

@@ -47,7 +47,7 @@ func TestParseMore(t *testing.T) {
 		{in: `abc;`, out: []string{"abc", ";"}},
 		{in: `;`, out: []string{";"}},
 		{in: "   \n", out: nil},
-		{in: `\`, out: []string{"\"}}, // trailing backslash at EOF
+		{in: "\\", out: []string{"\\"}}, // trailing backslash at EOF
 	} {
 		t.Run(tt.in, func(t *testing.T) {
 			out, err := Line(tt.in)
