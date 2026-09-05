@@ -49,8 +49,8 @@ func SetForwarder(name, remote string) error {
 
 func NewForwarder(name, socket string) error {
 	s := MakeSession(socket, "")
-	s.Remove()
 	conn, err := s.Listen()
+	s.Remove()
 	if err != nil {
 		return err
 	}

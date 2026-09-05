@@ -235,7 +235,7 @@ func (m *MessengerReader) fill(count int) bool {
 			// We can't fit in the message buffer, so
 			// reallocate, rounding up to a 4K buffer size.
 			nm := make([]byte, (count+0x1000)&^0xfff)
-			m.mt = copy(nm, m.message[:m.mt-m.mh])
+			m.mt = copy(nm, m.message[m.mh:m.mt])
 			m.mh = 0
 			m.message = nm
 		} else if m.mh+count > cap(m.message) {

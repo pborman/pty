@@ -191,6 +191,7 @@ Loop:
 				e.add(e.inseq.seen)
 			}
 			e.inseq = nil
+			buf = buf[x:]
 		}
 
 		x := bytes.IndexAny(buf, e.firstBytes)

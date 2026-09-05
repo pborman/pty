@@ -57,7 +57,7 @@ func Me() string {
 		if !ok {
 			break
 		}
-		if strings.Contains(file, "github.com/pborman/pty") {
+		if strings.Contains(file, "/pty/") {
 			if f := runtime.FuncForPC(pc); f != nil {
 				me = f.Name()
 				me = me[strings.LastIndex(me, ".")+1:]

@@ -134,6 +134,7 @@ func (r *Reader) readWord() (string, rune, error) {
 
 	word := &bytes.Buffer{}
 	for {
+		isQuoted := false
 		switch {
 		case err != nil:
 			return word.String(), 0, err
@@ -145,6 +146,7 @@ func (r *Reader) readWord() (string, rune, error) {
 				}
 				return "", 0, err
 			}
+			isQuoted = true
 		case r.IsSpace(c):
 			return word.String(), c, nil
 		case r.IsDelim(c):
@@ -167,6 +169,9 @@ func (r *Reader) readWord() (string, rune, error) {
 			word.WriteRune(c)
 		}
 		c, _, err = r.r.ReadRune()
+		if err == io.EOF && isQuoted && word.Len() == 0 {
+			return "", 0, nil
+		}
 	}
 }
 
