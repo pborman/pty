@@ -149,6 +149,9 @@ func TestCpuUsage(t *testing.T) {
 }
 
 func TestProcStat(t *testing.T) {
+	if _, err := os.Stat("/proc"); err != nil {
+		t.Skip("/proc not available")
+	}
 	pid := os.Getpid()
 	ps, err := ProcStat(pid)
 	if err != nil {

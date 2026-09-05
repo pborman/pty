@@ -16,6 +16,7 @@ package proc
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -57,6 +58,9 @@ func (p *Process) VIFiles() []string {
 }
 
 func TestPS(t *testing.T) {
+	if _, err := os.Stat("/proc"); err != nil {
+		t.Skip("/proc not available")
+	}
 	tree, err := NewProcessTree()
 	if err != nil {
 		t.Fatal(err)
