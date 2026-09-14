@@ -23,7 +23,6 @@ import (
 	"time"
 )
 
-
 func stopClient(c *Client) {
 	select {
 	case <-c.done:
