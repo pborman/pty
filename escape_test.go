@@ -16,6 +16,76 @@ package main
 
 import "testing"
 
+// TestEscapeBufferAltRouting checks that output is routed to the alt buffer
+// once an alt-screen switch is seen, even when the switch happens partway
+// through a Write (or straddles two Writes).  This is the "add closure binds
+// to the wrong buffer" boundary bug: add now re-checks e.inalt on every call
+// rather than being captured once at Write entry.
+func TestEscapeBufferAltRouting(t *testing.T) {
+	// The real switch sequences from shell.go.
+	const (
+		enterAlt = "\033[?1049h" // scasb: switch to alternate screen buffer
+		exitAlt  = "\033[?1049l" // nsbrc: switch back to normal screen buffer
+	)
+	for _, tt := range []struct {
+		name       string
+		input      []string
+		wantNormal string
+		wantAlt    string
+	}{
+		{
+			name:       "switch mid-write",
+			input:      []string{"AAA" + enterAlt + "BBB"},
+			wantNormal: "AAA",
+			wantAlt:    "BBB",
+		},
+		{
+			name:       "switch at write seam",
+			input:      []string{"AAA" + enterAlt, "BBB"},
+			wantNormal: "AAA",
+			wantAlt:    "BBB",
+		},
+		{
+			name:       "switch sequence split across writes",
+			input:      []string{"AAA\033[?10", "49hBBB"},
+			wantNormal: "AAA",
+			wantAlt:    "BBB",
+		},
+		{
+			name:       "round trip normal->alt->normal",
+			input:      []string{"AAA" + enterAlt + "BBB" + exitAlt + "CCC"},
+			wantNormal: "AAACCC",
+			wantAlt:    "BBB",
+		},
+	} {
+		e := NewEscapeBuffer(64)
+		e.AddSequence(enterAlt, func(e *EscapeBuffer) bool {
+			e.inalt = true
+			return false
+		})
+		e.AddSequence(exitAlt, func(e *EscapeBuffer) bool {
+			e.inalt = false
+			return false
+		})
+
+		t.Run(tt.name, func(t *testing.T) {
+			tlog = func(format string, v ...interface{}) {
+				t.Logf(format, v...)
+			}
+			for _, in := range tt.input {
+				e.Write([]byte(in))
+			}
+			e.Flush()
+			if got := string(e.normal); got != tt.wantNormal {
+				t.Errorf("normal = %q, want %q", got, tt.wantNormal)
+			}
+			if got := string(e.alt); got != tt.wantAlt {
+				t.Errorf("alt = %q, want %q", got, tt.wantAlt)
+			}
+		})
+	}
+}
+
 func TestEscapeBuffer(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
