@@ -11,7 +11,7 @@ package xterm
 import (
 	"fmt"
 
-	"github.com/pborman/pty/ansi"
+	"github.com/pborman/ansi"
 )
 
 const ESC = 033

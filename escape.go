@@ -22,8 +22,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pborman/pty/ansi"
-	"github.com/pborman/pty/ansi/xterm"
+	"github.com/pborman/ansi"
+	"github.com/pborman/pty/xterm"
 )
 
 func init() {
@@ -245,15 +245,13 @@ func (e *EscapeBuffer) sendEscapes(w io.Writer, alt bool) {
 	} else {
 		buf = e.normal
 	}
-	r := ansi.NewReader(bytes.NewBuffer(buf))
-	ch := make(chan ansi.S)
-	go func() {
-		r.Send(ch)
-		close(ch)
-	}()
 	seen := map[string]bool{}
-	for s := range ch {
-		seen[string(s.Code)] = true
+	// UTF8 keeps multibyte runes as text (bytes 0x80-0x9f are not treated
+	// as C1 controls); only real escape sequences (non-empty Type) count.
+	for _, s := range (ansi.Decoder{UTF8: true}).DecodeAll(buf) {
+		if s.Type != "" {
+			seen[string(s.Code)] = true
+		}
 	}
 	codes := make([]string, 0, len(seen))
 	for code := range seen {

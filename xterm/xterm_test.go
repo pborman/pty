@@ -3,7 +3,7 @@ package xterm
 import (
 	"testing"
 
-	"github.com/pborman/pty/ansi"
+	"github.com/pborman/ansi"
 )
 
 func TestImport(t *testing.T) {
