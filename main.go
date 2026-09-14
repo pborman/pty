@@ -277,11 +277,9 @@ func main() {
 	var buf [32768]byte
 	state := 0
 	<-ready
-	ecnt := 0
-	rcnt := 0
 	for {
-		rcnt++
-		n, rerr := os.Stdin.Read(buf[:])
+		// This was rerr -- Remove this comment if we see no bad effects
+		n, err := os.Stdin.Read(buf[:])
 		hexdumps.Dump("IN", buf[:n])
 
 		var cmd byte
@@ -366,18 +364,22 @@ func main() {
 		}
 
 		state = 0
-		if rerr != nil {
-			log.Errorf("client read from stdin(%d): %v", os.Stdin.Fd(), rerr)
-			ecnt++
-			if ecnt > 10 {
-				if !strings.Contains(rerr.Error(), "broken pipe") {
-					exitf("%v", rerr)
+		/*
+			 * Remove this commit if we decide rerr was really not needed.
+			 * Turn this back into code if rerr was neeeded.
+			if rerr != nil {
+				log.Errorf("client read from stdin(%d): %v", os.Stdin.Fd(), rerr)
+				ecnt++
+				if ecnt > 10 {
+					if !strings.Contains(rerr.Error(), "broken pipe") {
+						exitf("%v", rerr)
+					}
+					exit(0)
 				}
-				exit(0)
+			} else {
+				ecnt = 0
 			}
-		} else {
-			ecnt = 0
-		}
+		*/
 	}
 }
 
