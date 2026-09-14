@@ -7,11 +7,13 @@ import (
 	"io"
 	"os"
 
-	"github.com/pborman/pty/ansi"
+	"github.com/pborman/ansi"
 )
 
 func main() {
-	r := ansi.NewWithBuffer(os.Stdin, make([]byte,1024*1024))
+	// UTF8 keeps multibyte runes intact (bytes 0x80-0x9f are not treated
+	// as C1 controls), matching the old unicode-safe Reader.
+	r := ansi.Decoder{UTF8: true}.NewReader(os.Stdin)
 	w := bufio.NewWriter(os.Stdout)
 	var sawCR bool
 	for {
@@ -22,8 +24,9 @@ func main() {
 			}
 			break
 		}
-		if s.Code == "" && len(s.Text) > 0 {
-			data := []byte(s.Text)
+		// A plain-text run has an empty Type; its bytes are in Code.
+		if s.Type == "" && len(s.Code) > 0 {
+			data := []byte(s.Code)
 			if data[0] == '\n' && sawCR {
 				data = data[1:]
 				sawCR = false
