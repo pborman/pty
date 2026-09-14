@@ -342,12 +342,14 @@ func (s *Session) MakeCooked() (err error) {
 
 func (s *Session) Exit(code int) {
 	s.MakeCooked()
+	clearNonblock()
 	log.DepthErrorf(1, "exit code %d", code)
 	exit(code)
 }
 
 func (s *Session) Exitf(format string, v ...interface{}) {
 	s.MakeCooked()
+	clearNonblock()
 	log.DepthErrorf(1, format, v...)
 	printf(format, v...)
 	exit(1)

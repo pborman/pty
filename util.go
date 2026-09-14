@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"syscall"
 
 	"github.com/pborman/pty/log"
 	"github.com/pborman/pty/mutex"
@@ -27,6 +28,32 @@ import (
 var (
 	debugLog *os.File
 )
+
+// clearNonblock clears O_NONBLOCK on the standard descriptors and reports
+// whether any of them had it set.
+//
+// O_NONBLOCK is a property of the open file description, not of the descriptor,
+// so it is shared by the terminal's shell and every one of its children.  libuv
+// sets it on the terminal and restores it only on an orderly close, which means
+// any program built on node or bun that is killed rather than exited leaves the
+// terminal non-blocking for everything that runs after it.  Inherited by the
+// client that state turns an ordinary read of stdin into a stream of EAGAIN
+// errors, which looks like a terminal that has stopped accepting input.
+func clearNonblock() bool {
+	found := false
+	for _, fd := range []int{0, 1, 2} {
+		flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_GETFL, 0)
+		if errno != 0 || flags&syscall.O_NONBLOCK == 0 {
+			continue
+		}
+		found = true
+		if _, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_SETFL,
+			flags&^syscall.O_NONBLOCK); errno != 0 {
+			log.Warnf("clearing O_NONBLOCK on fd %d: %v", fd, errno)
+		}
+	}
+	return found
+}
 
 func debugInit(path string) {
 	var err error

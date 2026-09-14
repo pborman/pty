@@ -51,6 +51,7 @@ var opts = struct {
 	Auto          bool   `getopt:"--auto           automatically attach to matching session"`
 	Create        bool   `getopt:"--create -c      create session if not existing"`
 	Grok          bool   `getopt:"--grok           grok input mapping"`
+	Hexdump       string `getopt:"--hexdump=FILE   hexdump terminal I/O to FILE"`
 }{
 	Escape: "^P",
 }
@@ -201,6 +202,19 @@ func main() {
 	}
 	displayMotd()
 
+	if opts.Hexdump != "" {
+		if err := hexdumps.Open(opts.Hexdump); err != nil {
+			exitf("hexdump: %v", err)
+		}
+	}
+
+	// A previous tenant of this terminal may have left it non-blocking.
+	// Session.Exit clears it again on the way out, so we do not hand the
+	// condition on to whatever runs next.
+	if clearNonblock() {
+		log.Warnf("terminal was left in non-blocking mode, cleared")
+	}
+
 	if err := session.MakeRaw(); err != nil {
 		exitf("stty: %v\n", err)
 	}
@@ -232,6 +246,7 @@ func main() {
 			if len(buf) == 0 {
 				return
 			}
+			hexdumps.Dump("OUT", buf)
 			if _, err := os.Stdout.Write(buf); err != nil {
 				log.Errorf("Writing to stdout: %v", err)
 			}
@@ -267,6 +282,7 @@ func main() {
 	for {
 		rcnt++
 		n, rerr := os.Stdin.Read(buf[:])
+		hexdumps.Dump("IN", buf[:n])
 
 		var cmd byte
 		if session.tilde != 0 {
@@ -305,6 +321,7 @@ func main() {
 			if opts.Grok {
 				input = bytes.ReplaceAll(input, []byte{0x7f}, []byte{0x08})
 			}
+			hexdumps.Dump("SND", input)
 			_, err2 := w.Write(input)
 			if err == nil {
 				err = err2
