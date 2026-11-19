@@ -222,6 +222,26 @@ Loop:
 	}
 }
 
+func ChooseSession(id string) (*Session, error) {
+	sessions := GetSessions()
+	fmt.Print("PTY Sessions:\n")
+	for _, s := range sessions {
+		fmt.Printf("%d:%s\n", s.cnt, s.Name)
+	}
+	fmt.Print("?\n")
+	name, err := readline()
+	if err != nil {
+		return nil, err
+	}
+	name = strings.TrimSpace(name)
+	for _, s := range sessions {
+		if s.Name == name {
+			return s.Attach(id), nil
+		}
+	}
+	return MakeSession(name, id), nil
+}
+
 func readYesNo(format string, v ...interface{}) (bool, error) {
 	for {
 		fmt.Printf(format, v...)
