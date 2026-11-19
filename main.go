@@ -48,6 +48,7 @@ var opts = struct {
 	DebugServer   bool   `getopt:"--debug_server   enable server debugging"`
 	Detach        bool   `getopt:"--detach         create and detach new shell, do not connect"`
 	List          bool   `getopt:"--list           just list existing sessions"`
+	Choose        bool   `getopt:"--choose         machine choose/create session"`
 	Auto          bool   `getopt:"--auto           automatically attach to matching session"`
 	Create        bool   `getopt:"--create -c      create session if not existing"`
 	Grok          bool   `getopt:"--grok           grok input mapping"`
@@ -129,6 +130,18 @@ func main() {
 		session = MakeSession(opts.New, opts.ID)
 		if session.Check() {
 			exitf("session name already in use")
+		}
+	case len(args) == 0 && opts.Choose:
+		session, err = ChooseSession(opts.ID)
+		switch err {
+		case nil:
+		case io.EOF:
+			exit(1)
+		default:
+			exitf("selecting session: %v", err)
+		}
+		if session == nil {
+			exit(42)
 		}
 	case len(args) == 0:
 		session, err = SelectSession(opts.ID)
