@@ -48,6 +48,7 @@ var opts = struct {
 	DebugServer   bool   `getopt:"--debug_server   enable server debugging"`
 	Detach        bool   `getopt:"--detach         create and detach new shell, do not connect"`
 	List          bool   `getopt:"--list           just list existing sessions"`
+	MList         bool   `getopt:"--mlist          machine readable list of existing sessions"`
 	Choose        bool   `getopt:"--choose         machine choose/create session"`
 	Auto          bool   `getopt:"--auto           automatically attach to matching session"`
 	Create        bool   `getopt:"--create -c      create session if not existing"`
@@ -82,6 +83,14 @@ func main() {
 		fmt.Printf("Found %d sessions:\n", len(sis))
 		for _, si := range sis {
 			fmt.Printf("  %s (%d) %s\n", si.Name, si.cnt, si.Title())
+		}
+		return
+	}
+
+	if opts.MList {
+		sis := GetSessions()
+		for _, si := range sis {
+			fmt.Printf("%d:%s\n", si.cnt, si.Name)
 		}
 		return
 	}
