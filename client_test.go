@@ -108,6 +108,7 @@ func TestGetFDAndCheckClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer os.Remove(f.Name())
 	name, fd := getFD(f)
 	if fd < 0 {
 		t.Errorf("getFD fd = %d", fd)
@@ -128,13 +129,16 @@ func TestGetFDAndCheckClose(t *testing.T) {
 		t.Errorf("checkClose(struct): %v", err)
 	}
 
+	// checkClose closes in the background, so wait for it.
 	cb := &closeBuffer{}
 	if err := checkClose(cb); err != nil {
 		t.Errorf("checkClose(closeBuffer): %v", err)
 	}
-	time.Sleep(20 * time.Millisecond)
-	if !cb.closed {
-		t.Error("checkClose did not close closeBuffer")
+	for deadline := time.Now().Add(5 * time.Second); !cb.isClosed(); {
+		if time.Now().After(deadline) {
+			t.Fatal("checkClose did not close closeBuffer")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

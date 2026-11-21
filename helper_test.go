@@ -17,6 +17,7 @@ package main
 import (
 	"io"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -59,19 +60,33 @@ func (e errWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// closeBuffer is an io.WriteCloser that records what is written and whether
+// it has been closed.  It may be written and closed from other goroutines, as
+// checkClose does.
 type closeBuffer struct {
+	mu     sync.Mutex
 	buf    []byte
 	closed bool
 }
 
 func (c *closeBuffer) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.buf = append(c.buf, p...)
 	return len(p), nil
 }
 
 func (c *closeBuffer) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.closed = true
 	return nil
+}
+
+func (c *closeBuffer) isClosed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
 }
 
 func (c *closeBuffer) Name() string { return "closeBuffer" }

@@ -227,11 +227,15 @@ func TestSessionCommandCount(t *testing.T) {
 		}
 	}()
 
-	if !s.Check() {
+	// The client needs its own Session: Dial loads the secret into the
+	// Session, which the server goroutines above are reading.  In pty the
+	// client and server are separate processes.
+	client := MakeSession("cmd-count", "")
+	if !client.Check() {
 		t.Fatal("Check failed")
 	}
-	if s.cnt != 3 {
-		t.Errorf("cnt = %d, want 3", s.cnt)
+	if client.cnt != 3 {
+		t.Errorf("cnt = %d, want 3", client.cnt)
 	}
 }
 
