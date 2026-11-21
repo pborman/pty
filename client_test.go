@@ -16,7 +16,9 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"io/ioutil"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -165,5 +167,33 @@ func TestDisplayMotdPresent(t *testing.T) {
 	out, _ := ioutil.ReadAll(or)
 	if !bytes.Contains(out, []byte("hello motd")) {
 		t.Errorf("motd output = %q", out)
+	}
+}
+
+// checkClose must really close a socket: getFD used to dup the descriptor
+// with File, which kept the connection open until the dup was collected.
+func TestCheckCloseClosesSocket(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+
+	if _, fd := getFD(c); fd < 0 {
+		t.Errorf("getFD of a TCP conn = %d", fd)
+	}
+	checkClose(c)
+	peer.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := peer.Read(make([]byte, 1)); err != io.EOF {
+		t.Errorf("peer read after checkClose = %v, want EOF", err)
 	}
 }

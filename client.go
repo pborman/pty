@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	"github.com/pborman/pty/log"
 	"github.com/pborman/pty/mutex"
@@ -105,13 +106,11 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// getFD returns the name and file descriptor number of fd, for logging, or "?"
+// and -1 if they are not available.  It must not disturb fd: File would dup the
+// descriptor (keeping a socket open after fd is closed) and Fd would put an
+// *os.File into blocking mode, so the number is read through SyscallConn.
 func getFD(fd interface{}) (string, int) {
-	type filer interface {
-		File() (*os.File, error)
-	}
-	type fder interface {
-		Fd() uintptr
-	}
 	type namer interface {
 		Name() string
 	}
@@ -119,21 +118,15 @@ func getFD(fd interface{}) (string, int) {
 	if n, ok := fd.(namer); ok {
 		name = n.Name()
 	}
-	ffd := fd
-	if f, ok := fd.(filer); ok {
-		f1, err := f.File()
-		if err != nil {
-			log.Errorf("getting fd %v", err)
-			log.DumpStack()
-			return name, -1
+	fno := -1
+	if sc, ok := fd.(syscall.Conn); ok {
+		if rc, err := sc.SyscallConn(); err == nil {
+			rc.Control(func(f uintptr) { fno = int(f) })
 		}
-		ffd = f1
 	}
-	if f, ok := ffd.(fder); ok {
-		return name, int(f.Fd())
-	}
-	return name, -1
+	return name, fno
 }
+
 func checkClose(fd interface{}) error {
 	name, fno := getFD(fd)
 	if ioc, ok := fd.(io.Closer); ok {
