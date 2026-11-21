@@ -18,16 +18,23 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"sync"
 
 	"github.com/pborman/pty/log"
 	"github.com/pborman/pty/mutex"
 )
 
+// A forwarder lets processes in the shell reach a unix domain socket that
+// belongs to whichever client is currently primary, such as that client's
+// ssh-agent.  The shell's environment variable (e.g., SSH_AUTH_SOCK) names the
+// forwarder's own socket, which never changes; each connection to it is
+// proxied to the remote socket most recently reported by a client.  This keeps
+// the agent usable across detach and reattach from different ssh logins.
 type forwarder struct {
 	lconn  net.Listener
 	mu     *mutex.Mutex
-	remote *Session
+	remote string // path of the client's socket to forward to
 }
 
 var (
@@ -35,6 +42,8 @@ var (
 	forwarders   = map[string]*forwarder{}
 )
 
+// SetForwarder directs future connections to the forwarder for the
+// environment variable name to the unix domain socket at remote.
 func SetForwarder(name, remote string) error {
 	forwardersMu.Lock()
 	f := forwarders[name]
@@ -43,20 +52,22 @@ func SetForwarder(name, remote string) error {
 		return fmt.Errorf("no such socket: %s", name)
 	}
 	defer f.mu.Lock("SetForwarder")()
-	f.remote = MakeSession(remote, "")
+	f.remote = remote
 	return nil
 }
 
-func NewForwarder(name, socket string) error {
-	s := MakeSession(socket, "")
-	conn, err := s.Listen()
-	s.Remove()
+// NewForwarder listens on the unix domain socket socket and forwards each
+// connection to remote, which SetForwarder may later change.
+func NewForwarder(name, socket, remote string) error {
+	os.Remove(socket) // left behind by a server that did not exit cleanly
+	conn, err := net.Listen("unix", socket)
 	if err != nil {
 		return err
 	}
 	f := &forwarder{
-		mu:    mutex.New("Forwarder: " + name),
-		lconn: conn,
+		mu:     mutex.New("Forwarder: " + name),
+		lconn:  conn,
+		remote: remote,
 	}
 	forwardersMu.Lock()
 	forwarders[name] = f
@@ -77,14 +88,19 @@ func (f *forwarder) server() {
 			unlock := f.mu.Lock("server")
 			remote := f.remote
 			unlock()
-			f.session(c, remote)
+			if err := f.session(c, remote); err != nil {
+				log.Warnf("forward to %q: %v", remote, err)
+			}
 			checkClose(c)
 		}()
 	}
 }
 
-func (f *forwarder) session(c net.Conn, s *Session) error {
-	rc, err := s.Dial()
+func (f *forwarder) session(c net.Conn, remote string) error {
+	if remote == "" {
+		return fmt.Errorf("no socket to forward to")
+	}
+	rc, err := net.Dial("unix", remote)
 	if err != nil {
 		return err
 	}

@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -379,6 +380,26 @@ func (s *Shell) runout() {
 	}
 }
 
+// startForwarders points each variable named in config.Forward at a socket of
+// the shell's own that relays to the current primary client's socket.  Until
+// a client reports one, the value inherited from the client that started the
+// server is used.  If the socket cannot be created the inherited value is left
+// alone.
+func (s *Shell) startForwarders() {
+	for _, name := range config.Forward {
+		value := os.Getenv(name)
+		if value == "" {
+			continue
+		}
+		sock := filepath.Join(s.session.path, name+fwdSuffix)
+		if err := NewForwarder(name, sock, value); err != nil {
+			log.Warnf("forwarder[%s]: %v", name, err)
+			continue
+		}
+		s.Setenv(name, sock)
+	}
+}
+
 func (s *Shell) Start(debug bool) error {
 	s.Setenv("_PTY_NAME", s.session.Name)
 	s.Setenv("_PTY_SHELL", "true")
@@ -386,17 +407,7 @@ func (s *Shell) Start(debug bool) error {
 	if s.pty != nil {
 		return errors.New("shell already started")
 	}
-	for _, name := range config.Forward {
-		value := os.Getenv(name)
-		if value == "" {
-			continue
-		}
-		sock := name + fwdSuffix
-		s.Setenv(name, sock)
-		if err := NewForwarder(name, sock); err != nil {
-			s.session.Exitf("forwarder[%s]: %s\n", name, err)
-		}
-	}
+	s.startForwarders()
 	if s.cmd == nil {
 		s.cmd = exec.Command(s.Shell)
 		s.cmd.Args = s.Args
