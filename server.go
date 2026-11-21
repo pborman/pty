@@ -85,7 +85,12 @@ func (s *Shell) attach(c net.Conn) {
 	// Attach forwards the shells output to c.
 	mw := NewMessengerWriter(c)
 	client := NewClient(mw)
-	defer func() { go s.Detach(client) }()
+	defer func() {
+		go func() {
+			s.Detach(client)
+			client.Close()
+		}()
+	}()
 	attached := false
 	ech := make(chan error, 1)
 	go func() {
