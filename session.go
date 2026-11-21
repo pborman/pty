@@ -64,7 +64,7 @@ func ValidSessionName(name string) bool {
 
 func MakeSession(name, id string) *Session {
 	// We assume ValidSessionName was called
-	spawn := strings.HasPrefix(name, ".")
+	spawn := strings.HasPrefix(name, "/")
 	if spawn {
 		name = name[1:]
 	}

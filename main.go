@@ -101,7 +101,7 @@ func main() {
 
 	// If internal is set then we are being called from spawSession.
 	if opts.Internal != "" {
-		if !ValidSessionName(opts.Internal) {
+		if !ValidSessionName(strings.TrimPrefix(opts.Internal, "/")) {
 			exitf("invalid session name %q", opts.Internal)
 		}
 

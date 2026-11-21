@@ -236,10 +236,10 @@ func (s *Session) Spawn(debugFile string, foreground bool) {
 		s.run(debugFile)
 		return
 	}
-	// We prepend session with a "." to indicate we
+	// We prepend session with a "/" to indicate we
 	// want our child to fork another child and then
 	// s.Exit.
-	args := []string{"--internal", "." + s.Name}
+	args := []string{"--internal", "/" + s.Name}
 	if debugFile != "" {
 		args = append(args, "--internal_debug", s.Name+debugSuffix)
 	}
