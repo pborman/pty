@@ -52,6 +52,7 @@ var opts = struct {
 	Choose        bool   `getopt:"--choose         machine choose/create session"`
 	Auto          bool   `getopt:"--auto           automatically attach to matching session"`
 	Create        bool   `getopt:"--create -c      create session if not existing"`
+	Yes           bool   `getopt:"--yes -y         automatically answer yes to 'Continue?'"`
 	Grok          bool   `getopt:"--grok           grok input mapping"`
 	Hexdump       string `getopt:"--hexdump=FILE   hexdump terminal I/O to FILE"`
 }{
@@ -180,10 +181,10 @@ func main() {
 			}
 			exitf("no such session %s", args[0])
 		}
-		if session.cnt == 0 {
+		if session.cnt == 0 || opts.Yes {
 			break
 		}
-		ok, err := readYesNo("Session has %d client%s.\nContinue? [Y/n] ", session.cnt, splur(session.cnt))
+		ok, err := readYesNo("Session has %d client%s.\nContinue? [y/n] ", session.cnt, splur(session.cnt))
 		if err != nil {
 			exitf("reading: %v", err)
 		}
