@@ -49,7 +49,6 @@ var opts = struct {
 	Detach        bool   `getopt:"--detach         create and detach new shell, do not connect"`
 	List          bool   `getopt:"--list           just list existing sessions"`
 	MList         bool   `getopt:"--mlist          machine readable list of existing sessions"`
-	Choose        bool   `getopt:"--choose         machine choose/create session"`
 	Auto          bool   `getopt:"--auto           automatically attach to matching session"`
 	Create        bool   `getopt:"--create -c      create session if not existing"`
 	Yes           bool   `getopt:"--yes -y         automatically answer yes to 'Continue?'"`
@@ -140,18 +139,6 @@ func main() {
 		session = MakeSession(opts.New, opts.ID)
 		if session.Check() {
 			exitf("session name already in use")
-		}
-	case len(args) == 0 && opts.Choose:
-		session, err = ChooseSession(opts.ID)
-		switch err {
-		case nil:
-		case io.EOF:
-			exit(1)
-		default:
-			exitf("selecting session: %v", err)
-		}
-		if session == nil {
-			exit(42)
 		}
 	case len(args) == 0:
 		session, err = SelectSession(opts.ID)
