@@ -20,6 +20,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/pborman/pty/log"
 	"github.com/pborman/pty/mutex"
@@ -38,6 +39,7 @@ type Client struct {
 	ready   chan struct{}
 	done    chan struct{}
 	quit    chan struct{}
+	once    sync.Once // guards closing quit
 	out     io.Writer
 	primary bool
 	pid     int
@@ -89,19 +91,18 @@ func (c *Client) SendLocked(kind messageKind, buf []byte) bool {
 	return true
 }
 
-// Close implements ShellClient.
-func (c *Client) Close() {
-	if c.ready == nil {
-		return
-	}
-	select {
-	case c.ready <- struct{}{}:
-	default:
-	}
-	close(c.ready)
-	c.ready = nil
-	<-c.done
-	checkClose(c.out)
+// Close implements ShellClient and io.Closer.  It writes whatever output
+// is still queued, stops the client's output goroutine and closes c.out.
+// It is safe to call more than once and from more than one goroutine; every
+// call returns only after the queued output has been written.  Close always
+// returns nil.
+func (c *Client) Close() error {
+	c.once.Do(func() {
+		close(c.quit)
+		<-c.done
+		checkClose(c.out)
+	})
+	return nil
 }
 
 func getFD(fd interface{}) (string, int) {
@@ -179,30 +180,37 @@ func (c *Client) SetName(name string) {
 }
 
 // runout writes queued output from Output to the client's io.Writer.
+// It returns, after one last flush, once Close has closed c.quit.  The
+// ready channel is never closed, so Send cannot send on a closed channel.
 func (c *Client) runout() {
 	defer close(c.done)
-	ready := c.ready
 	for {
+		quitting := false
 		select {
-		case _, ok := <-ready:
-			if !ok {
-				return
-			}
+		case <-c.ready:
 		case <-c.quit:
+			quitting = true
+		}
+		c.flush()
+		if quitting {
 			return
 		}
-		for {
-			m := c.nextBuf()
-			if m.kind == 0 && m.data == nil {
-				break
+	}
+}
+
+// flush writes all the currently queued buffers to the client.
+func (c *Client) flush() {
+	for {
+		m := c.nextBuf()
+		if m.kind == 0 && m.data == nil {
+			return
+		}
+		if m.kind == 0 {
+			if _, err := c.out.Write(m.data); err != nil {
+				log.Infof("%v", err)
 			}
-			if m.kind == 0 {
-				if _, err := c.out.Write(m.data); err != nil {
-					log.Infof("%v", err)
-				}
-			} else if w, ok := c.out.(*MessengerWriter); ok {
-				w.Send(m.kind, m.data)
-			}
+		} else if w, ok := c.out.(*MessengerWriter); ok {
+			w.Send(m.kind, m.data)
 		}
 	}
 }

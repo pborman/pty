@@ -76,9 +76,8 @@ func (c *closeBuffer) Close() error {
 
 func (c *closeBuffer) Name() string { return "closeBuffer" }
 
-// closeClient calls Client.Close with a timeout. Close has been observed to
-// block forever waiting for runout; if that happens the test fails and quit
-// is closed so the suite can continue.
+// closeClient calls Client.Close with a timeout. Close once blocked forever
+// waiting for runout; if that happens again the test fails rather than hangs.
 func closeClient(t *testing.T, c *Client) {
 	t.Helper()
 	if c == nil {
@@ -93,11 +92,6 @@ func closeClient(t *testing.T, c *Client) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Error("Client.Close hung waiting for runout")
-		select {
-		case <-c.quit:
-		default:
-			close(c.quit)
-		}
 		select {
 		case <-done:
 		case <-time.After(time.Second):

@@ -29,12 +29,7 @@ func stopClient(c *Client) {
 		return
 	default:
 	}
-	select {
-	case <-c.quit:
-	default:
-		close(c.quit)
-	}
-	<-c.done
+	c.Close()
 }
 
 func TestClientOutput(t *testing.T) {

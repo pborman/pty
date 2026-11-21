@@ -137,7 +137,7 @@ type ShellClient interface {
 	// Close is called when no further output will be sent to the client.
 	// Close should block until the client has flushed all data that was
 	// sent via Output.
-	Close()
+	Close() error
 }
 
 // A Shell represents an actual running shell.  There may be zero or more
