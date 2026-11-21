@@ -18,6 +18,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -43,6 +44,7 @@ func TestLoggerMethods(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lg.Close()
 	lg.Info("hello-info")
 	lg.Infof("hello %s", "infof")
 	lg.Warnf("hello-warn")
@@ -78,6 +80,7 @@ func TestPrune(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lg.Close()
 
 	// A file that looks like a rotated log and is older than Age.
 	oldName := "prune-20000101.000000.1"
@@ -113,4 +116,37 @@ func TestNewLoggerOpenFail(t *testing.T) {
 	if err == nil {
 		t.Error("NewLogger through a file succeeded, want error")
 	}
+}
+
+// A logged message containing % must be written as is.  Outputf used to pass
+// the formatted message to Fprintf as the format.
+func TestOutputfPercent(t *testing.T) {
+	lg, err := NewLogger(filepath.Join(t.TempDir(), "pct"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lg.Infof("saving %s", "/tmp/50% done")
+	path := lg.last
+	lg.Close()
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "saving /tmp/50% done\n") {
+		t.Errorf("log = %q, want it to contain %q", data, "saving /tmp/50% done")
+	}
+}
+
+func TestCloseTwice(t *testing.T) {
+	lg, err := NewLogger(filepath.Join(t.TempDir(), "close"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lg.Close()
+	select {
+	case <-lg.done:
+	default:
+		t.Error("rotation still running after Close")
+	}
+	lg.Close()
 }

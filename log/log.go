@@ -36,12 +36,13 @@ var (
 )
 
 type Logger struct {
-	mu   sync.Mutex
-	fd   io.WriteCloser
-	path string
-	last string
-	quit bool
-	done chan struct{}
+	mu        sync.Mutex
+	fd        io.WriteCloser
+	path      string
+	last      string
+	quit      chan struct{} // closed by Close to stop rotation
+	closeOnce sync.Once
+	done      chan struct{} // closed when rotation has stopped
 }
 
 var logger *Logger
@@ -93,28 +94,48 @@ func NewLogger(path string) (*Logger, error) {
 	}
 	log := &Logger{
 		path: path,
+		quit: make(chan struct{}),
 		done: make(chan struct{}),
 	}
 	if err := log.open(); err != nil {
 		return nil, err
 	}
-	go func() {
-		for _ = range time.Tick(Duration) {
-			if log.quit {
-				log.fd.Close()
-				close(log.done)
-				return
-			}
-			if err := log.open(); err != nil {
-				log.Errorf("failed to rotate log: %v", err)
-			}
-			log.mu.Lock()
-			path = filepath.Dir(log.path)
-			log.mu.Unlock()
-			log.prune(path)
-		}
-	}()
+	// Read Duration here, not in the goroutine, so a later change to
+	// it affects only loggers created after the change.
+	go log.rotate(time.NewTicker(Duration))
 	return log, nil
+}
+
+// rotate starts a new log file, and prunes old ones, every time t ticks,
+// until Close is called.
+func (log *Logger) rotate(t *time.Ticker) {
+	defer close(log.done)
+	defer t.Stop()
+	for {
+		select {
+		case <-log.quit:
+			log.mu.Lock()
+			log.fd.Close()
+			log.mu.Unlock()
+			return
+		case <-t.C:
+		}
+		if err := log.open(); err != nil {
+			log.Errorf("failed to rotate log: %v", err)
+		}
+		log.mu.Lock()
+		dir := filepath.Dir(log.path)
+		log.mu.Unlock()
+		log.prune(dir)
+	}
+}
+
+// Close stops log rotation and closes the current log file.  Messages logged
+// after Close are discarded.  Close may be called more than once.
+func (log *Logger) Close() error {
+	log.closeOnce.Do(func() { close(log.quit) })
+	<-log.done
+	return nil
 }
 
 func TakeStderr() {
@@ -144,7 +165,9 @@ func (log *Logger) prune(dir string) {
 		return
 	}
 	expire := time.Now().Add(-Age)
+	log.mu.Lock()
 	last := filepath.Base(log.last)
+	log.mu.Unlock()
 	for _, name := range names {
 		p := strings.LastIndex(name, ".")
 		if name == last {
@@ -180,10 +203,12 @@ func (l *Logger) open() error {
 		return err
 	}
 
-	// Need to do this outside of the lock, but l.fd will only
-	// be nil the very first time we are called and then we know
-	// there is no race.
-	if l.fd != nil {
+	// Announce the switch in the old file.  Infof takes l.mu, so check
+	// for an old file under the lock but log outside it.
+	l.mu.Lock()
+	switching := l.fd != nil
+	l.mu.Unlock()
+	if switching {
 		l.Infof("switching to log %s", path)
 	}
 	l.mu.Lock()
@@ -232,8 +257,10 @@ func (l *Logger) Outputf(depth int, prefix string, format string, v ...interface
 		fmt.Fprint(os.Stderr, msg)
 		return
 	}
+	// msg is already formatted; writing it with Fprintf would mangle
+	// any % it contains.
 	l.mu.Lock()
-	fmt.Fprintf(l.fd, msg)
+	io.WriteString(l.fd, msg)
 	l.mu.Unlock()
 }
 
