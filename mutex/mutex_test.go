@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -35,25 +36,37 @@ func init() {
 	logger = func(n int, p, format string, v ...interface{}) {}
 }
 
+// nwaiting returns the number of callers waiting for m.
+func nwaiting(m *Mutex) int {
+	m.imu.Lock()
+	defer m.imu.Unlock()
+	return len(m.waiting)
+}
+
 func TestNoDebug(t *testing.T) {
 	reset(false)
 	m := New("D")
 
 	unlock := m.Lock("1")
 
-	here := false
+	// got is closed once the goroutine holds the lock.  Waiting for it
+	// also keeps the goroutine from outliving the test, where it would
+	// race with the next test's reset.
+	got := make(chan struct{})
 	go func() {
 		defer m.Lock("2")()
-		here = true
+		close(got)
 	}()
-	time.Sleep(time.Second / 100)
-	if here {
+	select {
+	case <-got:
 		t.Errorf("double lock")
+	case <-time.After(time.Second / 100):
 	}
 	unlock()
 
-	time.Sleep(time.Second / 100)
-	if !here {
+	select {
+	case <-got:
+	case <-time.After(5 * time.Second):
 		t.Errorf("lock blocked")
 	}
 }
@@ -62,7 +75,7 @@ func TestSimple(t *testing.T) {
 	m := New("M")
 	unlock := m.Lock("L")
 
-	if want, got := 0, len(m.waiting); want != got {
+	if want, got := 0, nwaiting(m); want != got {
 		t.Errorf("Got %d waiting, want %d", want, got)
 	}
 
@@ -70,22 +83,19 @@ func TestSimple(t *testing.T) {
 	go func() {
 		unlock := m.Lock("B")
 		t.Log("B took the lock")
-		if want, got := 0, len(m.waiting); want != got {
+		if want, got := 0, nwaiting(m); want != got {
 			t.Errorf("Got %d waiting, want %d", want, got)
 		}
 		unlock()
 		close(fdone)
 	}()
 	time.Sleep(time.Second / 100)
-	tm := time.NewTimer(time.Second)
-
-	go func() {
-		<-tm.C
+	tm := time.AfterFunc(time.Second, func() {
 		t.Errorf("timed out")
 		Dump(os.Stderr)
-	}()
+	})
 
-	if want, got := 1, len(m.waiting); want != got {
+	if want, got := 1, nwaiting(m); want != got {
 		t.Errorf("Got %d waiting, want %d", want, got)
 	}
 	tm.Stop()
@@ -289,5 +299,28 @@ func TestDump(t *testing.T) {
 	}
 	if failed {
 		t.Logf("%s", buf.String())
+	}
+}
+
+// New must be safe to call concurrently when debugging: it used to read and
+// increment index without holding mu, which could give two mutexes the same
+// name.
+func TestNewConcurrent(t *testing.T) {
+	reset(true)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			New("C")
+		}()
+	}
+	wg.Wait()
+	seen := map[string]bool{}
+	for _, m := range list {
+		if seen[m.name] {
+			t.Errorf("duplicate mutex name %s", m.name)
+		}
+		seen[m.name] = true
 	}
 }

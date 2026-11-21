@@ -95,12 +95,12 @@ func New(name string) *Mutex {
 	if !debug {
 		return &Mutex{}
 	}
+	mu.Lock()
 	m := &Mutex{
 		name:    location(index, name),
 		waiting: map[string]struct{}{},
 	}
 	index++
-	mu.Lock()
 	list = append(list, m)
 	mu.Unlock()
 	return m
