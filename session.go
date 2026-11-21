@@ -122,11 +122,28 @@ func (s *Session) Title() string {
 	return ""
 }
 
+// Addr returns the address of the session's server: the path of a unix domain
+// socket, or a TCP host:port.  It returns "" if the server has not published
+// an address yet.
 func (s *Session) Addr() string {
-	if data, err := s.readfile("addr"); err == nil {
-		return data
+	_, addr := s.netAddr()
+	return addr
+}
+
+// netAddr returns the network ("unix" or "tcp") and address of the session's
+// server, as recorded in the session's addr file.  addr holds either the
+// absolute path of the server's unix domain socket or, when the server fell
+// back to TCP, host:port.  A TCP address never starts with "/".
+func (s *Session) netAddr() (network, addr string) {
+	addr, err := s.readfile("addr")
+	switch {
+	case err != nil || addr == "":
+		return "", ""
+	case strings.HasPrefix(addr, "/"):
+		return "unix", addr
+	default:
+		return "tcp", addr
 	}
-	return ""
 }
 
 func (s *Session) GetSecret() error {
@@ -203,8 +220,9 @@ func (s *Session) Check() bool {
 
 func (s *Session) Dial() (net.Conn, error) {
 	start := time.Now()
+	var network, addr string
 	for {
-		if s.Addr() != "" {
+		if network, addr = s.netAddr(); addr != "" {
 			break
 		}
 		if time.Now().Sub(start) > time.Second*5 {
@@ -212,12 +230,8 @@ func (s *Session) Dial() (net.Conn, error) {
 		}
 		time.Sleep(time.Second / 10)
 	}
-	addr, err := net.ResolveTCPAddr("tcp", s.Addr())
-	if err != nil {
-		return nil, err
-	}
-	log.Infof("Dialing %s @ %v", s.Name, addr)
-	c, err := net.DialTCP("tcp", nil, addr)
+	log.Infof("Dialing %s @ %s %s", s.Name, network, addr)
+	c, err := net.Dial(network, addr)
 	// If GetSecret fails then fall back to the old
 	// unencrypted version.
 	if err != nil || s.GetSecret() != nil {
@@ -226,6 +240,11 @@ func (s *Session) Dial() (net.Conn, error) {
 	return econn.Client(c, s.secret[:])
 }
 
+// Listen creates the session's server socket and publishes its address in the
+// session directory.  It uses a unix domain socket when it can, and falls back
+// to TCP on the loopback interface when a working unix domain socket cannot be
+// created (the path is too long for sun_path, the filesystem cannot hold
+// sockets, ...).  Either way connections are wrapped with econn by the caller.
 func (s *Session) Listen() (net.Listener, error) {
 	if _, err := rand.Read(s.secret[:]); err != nil {
 		return nil, fmt.Errorf("failed to create secret: %w", err)
@@ -233,19 +252,75 @@ func (s *Session) Listen() (net.Listener, error) {
 	if err := s.SetSecret(); err != nil {
 		return nil, fmt.Errorf("failed to write secret: %w", err)
 	}
+	// Withdraw any address left by an earlier server so no client dials
+	// the new socket before it has been checked.
+	os.Remove(filepath.Join(s.path, "addr"))
+	conn, err := s.listenUnix()
+	if err != nil {
+		log.Warnf("%s: cannot use a unix domain socket, using TCP: %v", s.Name, err)
+		if conn, err = s.listenTCP(); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.SetPid(os.Getpid()); err != nil {
+		s.Remove()
+		conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+// listenUnix listens on a unix domain socket named socket in the session
+// directory and records its path in addr.
+//
+// addr is written only after a test connection to the socket has succeeded,
+// so a filesystem that accepts the bind but cannot carry connections is caught
+// here, and no client can find the socket while the test is using it.
+func (s *Session) listenUnix() (net.Listener, error) {
+	path := filepath.Join(s.path, "socket")
+	os.Remove(path) // left behind by a server that did not exit cleanly
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		return nil, err
+	}
+	if err := probeUnix(ln, path); err != nil {
+		ln.Close() // also unlinks path
+		return nil, err
+	}
+	if err := s.SetAddr(path); err != nil {
+		ln.Close()
+		return nil, err
+	}
+	return ln, nil
+}
+
+// probeUnix verifies that ln, bound at path, accepts a connection.
+func probeUnix(ln *net.UnixListener, path string) error {
+	c, err := net.DialTimeout("unix", path, time.Second)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	ln.SetDeadline(time.Now().Add(time.Second))
+	defer ln.SetDeadline(time.Time{})
+	sc, err := ln.Accept()
+	if err != nil {
+		return err
+	}
+	return sc.Close()
+}
+
+// listenTCP listens on an ephemeral port on 127.0.0.1 and writes host:port to
+// the session's addr file.
+func (s *Session) listenTCP() (net.Listener, error) {
 	addr := &net.TCPAddr{
 		IP: net.IPv4(127, 0, 0, 1),
 	}
 	conn, err := net.ListenTCP("tcp", addr)
 	if err != nil {
-		s.Exitf("server: %v", err)
-	}
-	if err := s.SetAddr(conn.Addr().String()); err != nil {
-		s.Remove()
-		conn.Close()
 		return nil, err
 	}
-	if err := s.SetPid(os.Getpid()); err != nil {
+	if err := s.SetAddr(conn.Addr().String()); err != nil {
 		s.Remove()
 		conn.Close()
 		return nil, err
