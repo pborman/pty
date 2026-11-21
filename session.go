@@ -51,7 +51,7 @@ type Session struct {
 const validBytes = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-.+!=:[]<>{} "
 
 func ValidSessionName(name string) bool {
-	if name == "log" {
+	if name == "" || name == "log" || name[0] == '.' {
 		return false
 	}
 	for _, c := range name {
@@ -64,7 +64,7 @@ func ValidSessionName(name string) bool {
 
 func MakeSession(name, id string) *Session {
 	// We assume ValidSessionName was called
-	spawn := strings.HasPrefix(name, "+")
+	spawn := strings.HasPrefix(name, "/")
 	if spawn {
 		name = name[1:]
 	}

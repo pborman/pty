@@ -48,6 +48,7 @@ var opts = struct {
 	DebugServer   bool   `getopt:"--debug_server   enable server debugging"`
 	Detach        bool   `getopt:"--detach         create and detach new shell, do not connect"`
 	List          bool   `getopt:"--list           just list existing sessions"`
+	MList         bool   `getopt:"--mlist          machine readable list of existing sessions"`
 	Choose        bool   `getopt:"--choose         machine choose/create session"`
 	Auto          bool   `getopt:"--auto           automatically attach to matching session"`
 	Create        bool   `getopt:"--create -c      create session if not existing"`
@@ -86,13 +87,21 @@ func main() {
 		return
 	}
 
+	if opts.MList {
+		sis := GetSessions()
+		for _, si := range sis {
+			fmt.Printf("%d:%s\n", si.cnt, si.Name)
+		}
+		return
+	}
+
 	if os.Getenv("_PTY_SHELL") != "" {
 		exitf("cannot run pty within a shell spawned by pty")
 	}
 
 	// If internal is set then we are being called from spawSession.
 	if opts.Internal != "" {
-		if !ValidSessionName(opts.Internal) {
+		if !ValidSessionName(strings.TrimPrefix(opts.Internal, "/")) {
 			exitf("invalid session name %q", opts.Internal)
 		}
 

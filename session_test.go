@@ -29,8 +29,10 @@ func TestValidSessionName(t *testing.T) {
 		in   string
 		want bool
 	}{
-		{"", true},
+		{"", false},
 		{"ok", true},
+		{"+ok", true},
+		{"/ok", false},
 		{"log", false},
 		{"has/slash", false},
 		{"spaces are ok", true},
@@ -94,7 +96,7 @@ func TestSessionFiles(t *testing.T) {
 		t.Errorf("DebugPath = %q", s.DebugPath())
 	}
 
-	spawned := MakeSession("+spawned", "")
+	spawned := MakeSession("/spawned", "")
 	defer spawned.Remove()
 	if spawned.Name != "spawned" {
 		t.Errorf("spawned Name = %q", spawned.Name)
