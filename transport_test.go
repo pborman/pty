@@ -57,7 +57,7 @@ func withLongHome(t *testing.T) {
 }
 
 // roundTrip has a fresh client Dial the session served by ln and checks that
-// data flows both ways through econn.
+// data flows both ways (through econn when the session uses TCP).
 func roundTrip(t *testing.T, s *Session, ln net.Listener) {
 	t.Helper()
 	errc := make(chan error, 1)
@@ -67,7 +67,7 @@ func roundTrip(t *testing.T, s *Session, ln net.Listener) {
 			errc <- err
 			return
 		}
-		sc, err := econn.Server(c, s.secret[:])
+		sc, err := s.secure(c)
 		if err != nil {
 			errc <- err
 			return
@@ -315,5 +315,109 @@ func TestNetAddrUnreadable(t *testing.T) {
 	}
 	if network, addr := s.netAddr(); network != "" || addr != "" {
 		t.Errorf("netAddr of unreadable addr = %q, %q", network, addr)
+	}
+}
+
+func TestUnixSessionIsPlain(t *testing.T) {
+	withShortHome(t)
+	s := MakeSession("plain", "")
+	defer s.Remove()
+	ln, err := s.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if _, err := os.Lstat(filepath.Join(s.path, "secret")); !os.IsNotExist(err) {
+		t.Errorf("unix session wrote a secret: %v", err)
+	}
+
+	// A raw connection to the socket talks directly to the server.
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		sc, _ := s.secure(c)
+		if sc != c {
+			t.Errorf("secure wrapped a unix connection: %T", sc)
+		}
+		sc.Write([]byte("plain"))
+		sc.Close()
+	}()
+	c, err := net.Dial("unix", filepath.Join(s.path, "socket"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	got, err := io.ReadAll(c)
+	if err != nil || string(got) != "plain" {
+		t.Errorf("read %q, %v, want %q", got, err, "plain")
+	}
+}
+
+func TestTCPSessionRequiresSecret(t *testing.T) {
+	withLongHome(t)
+	s := MakeSession("secret", "")
+	defer s.Remove()
+	ln, err := s.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if _, err := os.Lstat(filepath.Join(s.path, "secret")); err != nil {
+		t.Fatalf("TCP session has no secret: %v", err)
+	}
+
+	// A client that does not speak econn is refused.
+	oldTimeout := econn.Timeout
+	econn.Timeout = 5 * time.Second
+	defer func() { econn.Timeout = oldTimeout }()
+	errc := make(chan error, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			errc <- err
+			return
+		}
+		_, err = s.secure(c)
+		c.Close()
+		errc <- err
+	}()
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Write([]byte("not an econn handshake, just some plain bytes\n"))
+	c.Close()
+	if err := <-errc; err == nil {
+		t.Error("server accepted a client without the secret")
+	}
+
+	// A client that cannot read the secret does not fall back to
+	// plaintext.
+	if err := os.Remove(filepath.Join(s.path, "secret")); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := MakeSession(s.Name, "").Dial(); err == nil {
+		c.Close()
+		t.Error("Dial without the secret succeeded")
+	}
+}
+
+func TestListenRemovesStaleSecret(t *testing.T) {
+	withShortHome(t)
+	s := MakeSession("old-secret", "")
+	defer s.Remove()
+	if err := s.SetSecret(); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := s.Listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if _, err := os.Lstat(filepath.Join(s.path, "secret")); !os.IsNotExist(err) {
+		t.Errorf("stale secret left in a unix session: %v", err)
 	}
 }

@@ -20,8 +20,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/pborman/pty/econn"
 )
 
 func TestValidSessionName(t *testing.T) {
@@ -147,7 +145,7 @@ func TestSessionListenDial(t *testing.T) {
 			errc <- err
 			return
 		}
-		sc, err := econn.Server(c, s.secret[:])
+		sc, err := s.secure(c)
 		if err != nil {
 			errc <- err
 			return
@@ -209,7 +207,7 @@ func TestSessionCommandCount(t *testing.T) {
 				return
 			}
 			go func() {
-				sc, err := econn.Server(c, s.secret[:])
+				sc, err := s.secure(c)
 				if err != nil {
 					return
 				}

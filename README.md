@@ -21,7 +21,7 @@ pty is both a client and server.  The first time pty is called (or anytime when 
 ```
 Name of session to create (or shell): 
 ```
-Specifying shell just execs your login shell (you should have just used ssh without pty).  The session name must not contain slashes.  Once a session name is chosen, pty will fork and fork again itself as a pty server.  The server spawns an interactive shell.  The original pty (the client) then connects to the server forwards standard in/out/error between the login shell and the client.  The connection is over TCP on the loopback interface (127.0.0.1).  The address of the server is written to ```$HOME/.pty/session-SESSION-NAME```.  If there are sessions existing, pty asks you to select a session:
+Specifying shell just execs your login shell (you should have just used ssh without pty).  The session name must not contain slashes.  Once a session name is chosen, pty will fork and fork again itself as a pty server.  The server spawns an interactive shell.  The original pty (the client) then connects to the server forwards standard in/out/error between the login shell and the client.  The connection is over the unix domain socket ```$HOME/.pty/@SESSION-NAME/socket```, whose path is written to ```$HOME/.pty/@SESSION-NAME/addr```.  If a unix domain socket cannot be used there (for example the path is too long, or the home directory is on a filesystem that cannot hold sockets) the server falls back to TCP on the loopback interface (127.0.0.1), writes host:port to ```addr```, and encrypts connections with a secret stored in the same directory.  If there are sessions existing, pty asks you to select a session:
 ```
 Current sessions:
    -1) Spawn /usr/bin/ksh

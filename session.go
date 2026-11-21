@@ -232,29 +232,42 @@ func (s *Session) Dial() (net.Conn, error) {
 	}
 	log.Infof("Dialing %s @ %s %s", s.Name, network, addr)
 	c, err := net.Dial(network, addr)
-	// If GetSecret fails then fall back to the old
-	// unencrypted version.
-	if err != nil || s.GetSecret() != nil {
+	if err != nil || network != "tcp" {
 		return c, err
 	}
+	// Anyone on this machine can connect to a loopback port, so TCP
+	// connections are authenticated and encrypted with the session's
+	// secret.  The server requires this, so without the secret there is
+	// no point continuing.
+	if err := s.GetSecret(); err != nil {
+		c.Close()
+		return nil, err
+	}
 	return econn.Client(c, s.secret[:])
+}
+
+// secure prepares c, accepted by a session's listener, for use.  A unix domain
+// socket connection is used as is: the socket is in the session's 0700
+// directory, so the kernel has already limited who can connect to it to the
+// people who could read the secret anyway.  A TCP connection is wrapped with
+// econn, which requires the client to prove it holds the secret.
+func (s *Session) secure(c net.Conn) (net.Conn, error) {
+	if _, ok := c.(*net.TCPConn); !ok {
+		return c, nil
+	}
+	return econn.Server(c, s.secret[:])
 }
 
 // Listen creates the session's server socket and publishes its address in the
 // session directory.  It uses a unix domain socket when it can, and falls back
 // to TCP on the loopback interface when a working unix domain socket cannot be
 // created (the path is too long for sun_path, the filesystem cannot hold
-// sockets, ...).  Either way connections are wrapped with econn by the caller.
+// sockets, ...).  The caller passes accepted connections through secure.
 func (s *Session) Listen() (net.Listener, error) {
-	if _, err := rand.Read(s.secret[:]); err != nil {
-		return nil, fmt.Errorf("failed to create secret: %w", err)
-	}
-	if err := s.SetSecret(); err != nil {
-		return nil, fmt.Errorf("failed to write secret: %w", err)
-	}
-	// Withdraw any address left by an earlier server so no client dials
-	// the new socket before it has been checked.
+	// Withdraw any address and secret left by an earlier server so no
+	// client dials the new socket before it has been checked.
 	os.Remove(filepath.Join(s.path, "addr"))
+	os.Remove(filepath.Join(s.path, "secret"))
 	conn, err := s.listenUnix()
 	if err != nil {
 		log.Warnf("%s: cannot use a unix domain socket, using TCP: %v", s.Name, err)
@@ -310,9 +323,16 @@ func probeUnix(ln *net.UnixListener, path string) error {
 	return sc.Close()
 }
 
-// listenTCP listens on an ephemeral port on 127.0.0.1 and writes host:port to
-// the session's addr file.
+// listenTCP creates the session's secret, listens on an ephemeral port on
+// 127.0.0.1, and writes host:port to the session's addr file.  The secret is
+// written first so it is in place by the time a client finds addr.
 func (s *Session) listenTCP() (net.Listener, error) {
+	if _, err := rand.Read(s.secret[:]); err != nil {
+		return nil, fmt.Errorf("failed to create secret: %w", err)
+	}
+	if err := s.SetSecret(); err != nil {
+		return nil, fmt.Errorf("failed to write secret: %w", err)
+	}
 	addr := &net.TCPAddr{
 		IP: net.IPv4(127, 0, 0, 1),
 	}
