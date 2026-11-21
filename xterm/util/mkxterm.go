@@ -491,7 +491,7 @@ var escapelist = []struct {
 
 var code2string = map[string]string{
 	"APC": sescape + "_",
-	"BEL": string(bell),
+	"BEL": string(rune(bell)),
 	"BS":  string('H' & 037),
 	"CAN": string('X' & 037),
 	"CR":  "\r",
