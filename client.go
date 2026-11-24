@@ -130,7 +130,7 @@ func getFD(fd interface{}) (string, int) {
 func checkClose(fd interface{}) error {
 	name, fno := getFD(fd)
 	if ioc, ok := fd.(io.Closer); ok {
-		log.Infof("Closing %d %s %T", fno, name, fd)
+		log.Debugf("Closing %d %s %T", fno, name, fd)
 		log.DumpStack()
 		go func() {
 			ioc.Close()
