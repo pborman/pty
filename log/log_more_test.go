@@ -45,7 +45,6 @@ func TestLoggerMethods(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lg.Close()
-	lg.Info("hello-info")
 	lg.Infof("hello %s", "infof")
 	lg.Warnf("hello-warn")
 	lg.Errorf("hello-err")

@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -43,11 +44,13 @@ type Logger struct {
 	quit      chan struct{} // closed by Close to stop rotation
 	closeOnce sync.Once
 	done      chan struct{} // closed when rotation has stopped
+	verbose   atomic.Bool
 }
 
 var logger *Logger
 
 func Standard() *Logger { return logger }
+func SetVerbose(v bool) { logger.SetVerbose(v) }
 
 // Me returns the the function name of the deepest stack frame that is part of
 // the pty program.
@@ -138,6 +141,10 @@ func (log *Logger) Close() error {
 	return nil
 }
 
+func (log *Logger) SetVerbose(v bool) {
+	log.verbose.Store(v)
+}
+
 func TakeStderr() {
 	if f, ok := logger.fd.(*os.File); ok {
 		Infof("Taking over stderr")
@@ -195,32 +202,32 @@ func (log *Logger) prune(dir string) {
 	}
 }
 
-func (l *Logger) open() error {
-	os.MkdirAll(filepath.Dir(l.path), 0700)
-	path := fmt.Sprintf("%s-%s.%d", l.path, time.Now().Format(pformat), os.Getpid())
+func (log *Logger) open() error {
+	os.MkdirAll(filepath.Dir(log.path), 0700)
+	path := fmt.Sprintf("%s-%s.%d", log.path, time.Now().Format(pformat), os.Getpid())
 	fd, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0600)
 	if err != nil {
 		return err
 	}
 
-	// Announce the switch in the old file.  Infof takes l.mu, so check
+	// Announce the switch in the old file.  Infof takes log.mu, so check
 	// for an old file under the lock but log outside it.
-	l.mu.Lock()
-	switching := l.fd != nil
-	l.mu.Unlock()
+	log.mu.Lock()
+	switching := log.fd != nil
+	log.mu.Unlock()
 	if switching {
-		l.Infof("switching to log %s", path)
+		log.Infof("switching to log %s", path)
 	}
-	l.mu.Lock()
-	if l.fd != nil {
-		l.fd.Close()
+	log.mu.Lock()
+	if log.fd != nil {
+		log.fd.Close()
 	}
-	l.fd = fd
-	last := l.last
-	l.last = path
-	l.mu.Unlock()
+	log.fd = fd
+	last := log.last
+	log.last = path
+	log.mu.Unlock()
 	if last != "" {
-		l.Infof("switched from log %s", last)
+		log.Infof("switched from log %s", last)
 	}
 	return nil
 }
@@ -237,10 +244,10 @@ func last2(path string) string {
 	return path[n+1:]
 }
 
-func (l *Logger) Info(v ...interface{}) {
-	l.Outputf(2, "I", "%s", fmt.Sprint(v...))
-}
-func (l *Logger) Outputf(depth int, prefix string, format string, v ...interface{}) {
+func (log *Logger) Outputf(depth int, prefix string, format string, v ...interface{}) {
+	if prefix == "D" && !log.verbose.Load() {
+		return
+	}
 	_, file, line, ok := runtime.Caller(depth + 1)
 	if !ok {
 		file = "???"
@@ -253,20 +260,21 @@ func (l *Logger) Outputf(depth int, prefix string, format string, v ...interface
 		msg = msg[:len(msg)-1]
 	}
 	msg = fmt.Sprintf("%s%s %s: %s:%d] %s\n", prefix, time.Now().Format("15:04:05.000"), Me(), file, line, msg)
-	if l == nil {
+	if log == nil {
 		fmt.Fprint(os.Stderr, msg)
 		return
 	}
 	// msg is already formatted; writing it with Fprintf would mangle
 	// any % it contains.
-	l.mu.Lock()
-	io.WriteString(l.fd, msg)
-	l.mu.Unlock()
+	log.mu.Lock()
+	io.WriteString(log.fd, msg)
+	log.mu.Unlock()
 }
 
 func Errorf(format string, v ...interface{})            { logger.Outputf(1, "E", format, v...) }
 func Warnf(format string, v ...interface{})             { logger.Outputf(1, "W", format, v...) }
 func Infof(format string, v ...interface{})             { logger.Outputf(1, "I", format, v...) }
+func Debugf(format string, v ...interface{})            { logger.Outputf(1, "D", format, v...) }
 func Outputf(n int, p, format string, v ...interface{}) { logger.Outputf(n, p, format, v...) }
 
 func DepthErrorf(depth int, format string, v ...interface{}) {
@@ -282,8 +290,12 @@ func DepthInfof(depth int, format string, v ...interface{}) {
 func (log *Logger) Errorf(format string, v ...interface{}) { log.Outputf(1, "E", format, v...) }
 func (log *Logger) Warnf(format string, v ...interface{})  { log.Outputf(1, "W", format, v...) }
 func (log *Logger) Infof(format string, v ...interface{})  { log.Outputf(1, "I", format, v...) }
+func (log *Logger) Debugf(format string, v ...interface{}) { log.Outputf(1, "D", format, v...) }
 
 func (log *Logger) DumpGoroutines() {
+	if !log.verbose.Load() {
+		return
+	}
 	if p := pprof.Lookup("goroutine"); p != nil {
 		var b bytes.Buffer
 		p.WriteTo(&b, 2)
@@ -299,6 +311,9 @@ func (log *Logger) DumpGoroutines() {
 }
 
 func (log *Logger) DumpStack() {
+	if !log.verbose.Load() {
+		return
+	}
 	n := 15
 	for i := 1; i <= n; i++ {
 		pc, file, line, ok := runtime.Caller(i)
