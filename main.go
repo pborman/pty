@@ -47,15 +47,28 @@ var opts = struct {
 	Debug         bool   `getopt:"--debug          debug mode, leave server in foreground"`
 	DebugServer   bool   `getopt:"--debug_server   enable server debugging"`
 	Detach        bool   `getopt:"--detach         create and detach new shell, do not connect"`
+	Dead          bool   `getopt:"--dead           list the dead sessions"`
+	Clean         bool   `getopt:"--clean          cleanup dead sessions"`
 	List          bool   `getopt:"--list           just list existing sessions"`
 	MList         bool   `getopt:"--mlist          machine readable list of existing sessions"`
 	Auto          bool   `getopt:"--auto           automatically attach to matching session"`
 	Create        bool   `getopt:"--create -c      create session if not existing"`
 	Yes           bool   `getopt:"--yes -y         automatically answer yes to 'Continue?'"`
-	Grok          bool   `getopt:"--grok           grok input mapping"`
+	Grok          bool   `getopt:"--grok           grok input mapping (DEL -> \\b)"`
 	Hexdump       string `getopt:"--hexdump=FILE   hexdump terminal I/O to FILE"`
+	Verbose       bool   `getopt:"--verbose -v     turn on verbose debug"`
 }{
 	Escape: "^P",
+}
+
+func countBools(vs ...bool) int {
+	cnt := 0
+	for _, v := range vs {
+		if v {
+			cnt++
+		}
+	}
+	return cnt
 }
 
 func main() {
@@ -77,7 +90,14 @@ func main() {
 	}
 
 	args := options.RegisterAndParse(&opts)
+	log.SetVerbose(opts.Verbose)
 
+	switch countBools(opts.List, opts.MList, opts.Dead, opts.Clean, opts.Auto, opts.Create) {
+	case 0:
+	case 1:
+	default:
+		exitf("At most one of --create, --auto, --list, --mlist, --dead, or --clean can be specified")
+	}
 	if opts.List {
 		sis := GetSessions()
 		fmt.Printf("Found %d sessions:\n", len(sis))
@@ -88,9 +108,23 @@ func main() {
 	}
 
 	if opts.MList {
-		sis := GetSessions()
-		for _, si := range sis {
+		for _, si := range GetSessions() {
 			fmt.Printf("%d:%s\n", si.cnt, si.Name)
+		}
+		return
+	}
+
+	if opts.Dead {
+		for _, si := range GetDeadSessions() {
+			fmt.Printf("%s\n", si.Name)
+		}
+		return
+	}
+
+	if opts.Clean {
+		for _, si := range GetDeadSessions() {
+			fmt.Printf("Removing %s\n", si.Name)
+			os.RemoveAll(si.Path())
 		}
 		return
 	}
@@ -108,6 +142,7 @@ func main() {
 		session := MakeSession(opts.Internal, opts.ID)
 		log.Init(session.path + "/log/server")
 		log.TakeStderr()
+		log.SetVerbose(opts.Verbose)
 		session.run(opts.InternalDebug)
 		return
 	}
@@ -181,6 +216,7 @@ func main() {
 	}
 
 	log.Init(session.path + "/log/client")
+	log.SetVerbose(opts.Verbose)
 	log.TakeStderr()
 	session.tilde = tilde
 
