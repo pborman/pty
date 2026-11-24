@@ -115,3 +115,18 @@ func TestShellStartAlreadyStarted(t *testing.T) {
 		t.Error("Start on already-started shell succeeded")
 	}
 }
+
+func TestShellDropsRopenQuery(t *testing.T) {
+	defer withTempHome(t)()
+	sess := MakeSession("ropensess", "")
+	defer sess.Remove()
+
+	s := NewShell(sess)
+	s.eb.Write([]byte("before" + ropenQuery + "after"))
+	// The query split across writes must be dropped too.
+	s.eb.Write([]byte("x" + ropenQuery[:4]))
+	s.eb.Write([]byte(ropenQuery[4:] + "y"))
+	if got, want := string(s.eb.normal), "beforeafterxy"; got != want {
+		t.Errorf("recorded %q, want %q", got, want)
+	}
+}

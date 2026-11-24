@@ -116,6 +116,13 @@ const (
 	cls     = nsbrc + edb0 + edsaved + edb0
 	home    = "\033[H"
 	sendSSH = "\033[z"
+
+	// ropenQuery is how ropen asks an iPadSSH terminal for its current
+	// receiver address.  The terminal answers by typing
+	// "#ROPEN HOST:PORT/TOKEN NEPOR#" into the input.  Replaying the
+	// query on a reconnect would make the terminal type a stale answer
+	// at whatever is reading input, so it is never recorded.
+	ropenQuery = "\033]7717;ropen\007"
 )
 
 // A ShellClient can be attached to a Shell.
@@ -181,6 +188,9 @@ func NewShell(session *Session) *Shell {
 		session: session,
 	}
 	s.eb.AddSequence(sendSSH, func(eb *EscapeBuffer) bool {
+		return false
+	})
+	s.eb.AddSequence(ropenQuery, func(eb *EscapeBuffer) bool {
 		return false
 	})
 	s.eb.AddSequence(scasb, func(eb *EscapeBuffer) bool {
