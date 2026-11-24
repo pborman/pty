@@ -274,7 +274,17 @@ func readline() (string, error) {
 	}
 }
 
+// GetSessions returns the slice of sessions still alive.
 func GetSessions() []*Session {
+	return getSessions(true)
+}
+
+// GetDeadSessions returns the slice of sessions no longer alive.
+func GetDeadSessions() []*Session {
+	return getSessions(false)
+}
+
+func getSessions(alive bool) []*Session {
 	dir := filepath.Join(user.HomeDir, rcdir)
 	fd, err := os.Open(dir)
 	if err != nil {
@@ -294,7 +304,7 @@ func GetSessions() []*Session {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if !s.Check() {
+			if s.Check() != alive {
 				return
 			}
 			ch <- s
