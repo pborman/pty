@@ -166,6 +166,10 @@ func (s *Session) SessionID() string {
 	return ""
 }
 
+func (s *Session) Path() string {
+	return s.path
+}
+
 func (s *Session) DebugPath() string {
 	return filepath.Join(s.path, "debug")
 }
