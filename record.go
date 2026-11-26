@@ -33,8 +33,8 @@ import (
 //     iconify the window to suit long-gone output.
 //   - OSC 52, which sets a clipboard (replaying it sets the clipboard to a
 //     stale value) or queries it.
-//   - Pty's own ESC [ z, and the sequences in seqRules (the ropen query,
-//     and any named in config.yaml).
+//   - The sequences in seqRules (the ropen query, and any named in
+//     config.yaml).
 //
 // The record filters below drop these from the record.  Anything they do
 // not recognize is recorded as it arrived.  A sequence that sets something
@@ -295,8 +295,6 @@ func recordCSI(e *EscapeBuffer, raw []byte, complete bool) ([]byte, bool) {
 		return raw, true
 	}
 	switch string(raw) {
-	case sendSSH:
-		return nil, false
 	case scasb:
 		e.inalt = true
 		return nil, false

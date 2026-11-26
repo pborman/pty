@@ -202,8 +202,7 @@ variable that names a unix domain socket.  It only happens if the login that
 created the session had the variable set; pty does not invent one.
 
 The other way is `^P : ssh` at a shell prompt, which types the current
-`SSH_AUTH_SOCK=...` into the shell for you.  A program in the session can ask
-for the same thing by writing `ESC [ z`.
+`SSH_AUTH_SOCK=...` into the shell for you.
 
 ## Configuration
 

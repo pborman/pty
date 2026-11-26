@@ -289,7 +289,6 @@ func main() {
 		var buf [1024]byte
 		var err error
 		var n int
-		var sendSSHb = ([]byte)(sendSSH)
 
 		write := func(buf []byte) {
 			if len(buf) == 0 {
@@ -303,16 +302,7 @@ func main() {
 		}
 		for err == nil {
 			n, err = mr.Read(buf[:])
-			wbuf := buf[:n]
-
-			// We assume our magic escape sequence always
-			// comes in a single message
-			if x := bytes.Index(wbuf, sendSSHb); x >= 0 {
-				write(wbuf[:x])
-				command(true, session, w, "ssh")
-				wbuf = wbuf[x+len(sendSSH):]
-			}
-			write(wbuf)
+			write(buf[:n])
 		}
 		if err != nil && err != io.EOF {
 			exitf("client exit: %v", err)

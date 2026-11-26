@@ -85,7 +85,6 @@ var recordFilterTests = []struct {
 	{"OSC 52", "a\033]52;c;aGk=\007b\033]52;c;?\033\\c", "abc"},
 	{"ropen BEL", "a" + ropenQuery + "b", "ab"},
 	{"ropen ST", "a\033]7717;ropen\033\\b", "ab"},
-	{"pty ESC [ z", "a\033[zb", "ab"},
 
 	// Settings that share a sequence with a query keep the setting.
 	{"OSC 4 mixed", "a\033]4;1;?;2;red\007b", "a\033]4;2;red\007b"},

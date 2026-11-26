@@ -134,7 +134,6 @@ const (
 	edsaved = "\033[3J"     // Erase Saved Lines
 	cls     = nsbrc + edb0 + edsaved + edb0
 	home    = "\033[H"
-	sendSSH = "\033[z"
 	ctrlC   = '\003'
 )
 
