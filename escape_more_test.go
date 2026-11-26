@@ -81,7 +81,6 @@ func TestAddReportSequenceEmptySeq(t *testing.T) {
 }
 
 func TestReportSequenceSplitTerminator(t *testing.T) {
-	t.Skip("7-bit ST (ESC \\) can split across writes; CSI terminators are one byte and this is not worth handling")
 	e := NewEscapeBuffer(64)
 	var seen []string
 	e.AddReportSequence("\033]", "\033\\", func(_ *EscapeBuffer, data []byte) bool {

@@ -40,6 +40,7 @@ var tlog = func(format string, v ...interface{}) {}
 type seqCall struct {
 	seq      []byte
 	terms    [][]byte // each terminates the sequence; the earliest wins
+	maxTerm  int      // length of the longest of terms
 	seen     []byte   // bytes we have seen so far
 	callback func(*EscapeBuffer, []byte) bool
 }
@@ -91,15 +92,19 @@ func (e *EscapeBuffer) AddReportSequence(seq, term string, f func(*EscapeBuffer,
 // with any one of terms (for example an OSC, which ends with BEL or ESC \).
 // Empty strings in terms are ignored.
 //
-// A multi-byte terminator is only found if it arrives in a single Write.
+// A terminator is found even when it is split across calls to Write.
 func (e *EscapeBuffer) AddReportSequenceTerms(seq string, terms []string, f func(*EscapeBuffer, []byte) bool) {
 	if len(seq) == 0 {
 		return
 	}
 	var bterms [][]byte
+	maxTerm := 0
 	for _, t := range terms {
 		if t != "" {
 			bterms = append(bterms, []byte(t))
+			if len(t) > maxTerm {
+				maxTerm = len(t)
+			}
 		}
 	}
 	if len(bterms) == 0 {
@@ -115,6 +120,7 @@ func (e *EscapeBuffer) AddReportSequenceTerms(seq string, terms []string, f func
 	e.sequences = append(e.sequences, seqCall{
 		seq:      []byte(seq),
 		terms:    bterms,
+		maxTerm:  maxTerm,
 		callback: f,
 	})
 }
@@ -209,21 +215,27 @@ Loop:
 		// If we are in the middle of an escape sequence, wait
 		// for the ending bytes.
 		if e.inseq != nil {
-			// there is a bug here if the terminating
-			// sequence is more than one byte and is split
-			// across writes.
-			x, tl := indexTerm(buf, e.inseq.terms)
+			// A terminator may be split across writes, so
+			// search what has been seen so far, starting far
+			// enough back to catch one that began in an
+			// earlier write.  A terminator that ended in an
+			// earlier write would already have been found.
+			seq := e.inseq
+			from := len(seq.seen) - (seq.maxTerm - 1)
+			if from < 0 {
+				from = 0
+			}
+			seq.seen = append(seq.seen, buf...)
+			x, tl := indexTerm(seq.seen[from:], seq.terms)
 			if x < 0 {
-				e.inseq.seen = append(e.inseq.seen, buf...)
 				return n, nil
 			}
-			e.inseq.seen = append(e.inseq.seen, buf[:x]...)
-			x += tl
-			if e.inseq.callback(e, e.inseq.seen) {
-				e.add(e.inseq.seen)
-			}
+			x += from
 			e.inseq = nil
-			buf = buf[x:]
+			if seq.callback(e, seq.seen[:x]) {
+				e.add(seq.seen[:x])
+			}
+			buf = seq.seen[x+tl:]
 		}
 
 		x := bytes.IndexAny(buf, e.firstBytes)

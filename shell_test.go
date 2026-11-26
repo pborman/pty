@@ -149,6 +149,11 @@ func TestShellDropsOSC52(t *testing.T) {
 		{"split intro", []string{"a\033]5", "2;c;aGk=\007b"}, "ab"},
 		{"split body", []string{"a\033]52;c;aG", "k=\007b"}, "ab"},
 		{"split before ST", []string{"a\033]52;c;aGk=", "\033\\b"}, "ab"},
+		{"split inside ST", []string{"a\033]52;c;aGk=\033", "\\b"}, "ab"},
+		{"split inside ST, then more", []string{"a\033]52;c;aGk=\033", "\\b\033]52;c;?\007c"}, "abc"},
+		{"ESC alone at end, BEL next", []string{"a\033]52;c;aGk=\033", "\007b"}, "ab"},
+		{"byte at a time, ST", split1("a\033]52;c;aGk=\033\\b"), "ab"},
+		{"byte at a time, BEL", split1("a\033]52;c;?\007b"), "ab"},
 		{"other OSC kept", []string{"a\033]0;title\007b"}, "a\033]0;title\007b"},
 		{"OSC 520 kept", []string{"a\033]520;x\007b"}, "a\033]520;x\007b"},
 	} {
@@ -163,4 +168,13 @@ func TestShellDropsOSC52(t *testing.T) {
 			}
 		})
 	}
+}
+
+// split1 returns s as a list of one-byte strings.
+func split1(s string) []string {
+	out := make([]string, len(s))
+	for i := range s {
+		out[i] = s[i : i+1]
+	}
+	return out
 }
