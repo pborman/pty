@@ -182,7 +182,7 @@ func TestAppendtoOverflow(t *testing.T) {
 func TestAddReportSequenceTerms(t *testing.T) {
 	e := NewEscapeBuffer(64)
 	var seen []string
-	e.AddReportSequenceTerms("\033]", []string{"", "\a", "\033\\"}, func(_ *EscapeBuffer, data []byte) bool {
+	e.AddReportSequenceTerms("\033]", []string{"", "\a", "\033\\"}, "", func(_ *EscapeBuffer, data []byte) bool {
 		seen = append(seen, string(data))
 		return false
 	})
@@ -199,7 +199,7 @@ func TestAddReportSequenceTerms(t *testing.T) {
 func TestAddReportSequenceTermsNone(t *testing.T) {
 	e := NewEscapeBuffer(64)
 	called := 0
-	e.AddReportSequenceTerms("XYZ", []string{""}, func(*EscapeBuffer, []byte) bool {
+	e.AddReportSequenceTerms("XYZ", []string{""}, "", func(*EscapeBuffer, []byte) bool {
 		called++
 		return false
 	})
@@ -207,5 +207,52 @@ func TestAddReportSequenceTermsNone(t *testing.T) {
 	e.Flush()
 	if called != 1 || string(e.normal) != "abcd" {
 		t.Errorf("called %d, buffer %q; want 1, abcd", called, e.normal)
+	}
+}
+
+func TestEscapeBreak(t *testing.T) {
+	e := NewEscapeBuffer(64)
+	e.AddReportSequenceTerms("\033]52;", []string{"\a", "\033\\"}, "", func(*EscapeBuffer, []byte) bool {
+		return false
+	})
+	if e.Break() {
+		t.Error("Break with no sequence open returned true")
+	}
+	e.Write([]byte("a\033]52;c;never ending"))
+	e.Write([]byte(" still going\033"))
+	if !e.Break() {
+		t.Error("Break with a sequence open returned false")
+	}
+	if e.Break() {
+		t.Error("second Break returned true")
+	}
+	e.Write([]byte("b\033]52;c;?\ac"))
+	e.Flush()
+	if got, want := string(e.normal), "abc"; got != want {
+		t.Errorf("buffer = %q, want %q", got, want)
+	}
+}
+
+func TestAddReportSequenceTermsEnds(t *testing.T) {
+	e := NewEscapeBuffer(64)
+	var seen []string
+	e.AddReportSequenceTerms("\033]", []string{"\a", "\033\\"}, "\033", func(_ *EscapeBuffer, data []byte) bool {
+		seen = append(seen, string(data))
+		return false
+	})
+	// Ends only: no terms at all.
+	e.AddReportSequenceTerms("@{", nil, "}", func(_ *EscapeBuffer, data []byte) bool {
+		seen = append(seen, string(data))
+		return false
+	})
+	e.Write([]byte("a\033]one\033"))
+	e.Write([]byte("\\b\033]two\033"))
+	e.Write([]byte("Xc@{three}d"))
+	e.Flush()
+	if want := []string{"one", "two", "three"}; strings.Join(seen, ",") != strings.Join(want, ",") {
+		t.Errorf("payloads = %q, want %q", seen, want)
+	}
+	if got, want := string(e.normal), "ab\033Xc}d"; got != want {
+		t.Errorf("buffer = %q, want %q", got, want)
 	}
 }

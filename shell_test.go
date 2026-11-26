@@ -151,7 +151,15 @@ func TestShellDropsOSC52(t *testing.T) {
 		{"split before ST", []string{"a\033]52;c;aGk=", "\033\\b"}, "ab"},
 		{"split inside ST", []string{"a\033]52;c;aGk=\033", "\\b"}, "ab"},
 		{"split inside ST, then more", []string{"a\033]52;c;aGk=\033", "\\b\033]52;c;?\007c"}, "abc"},
-		{"ESC alone at end, BEL next", []string{"a\033]52;c;aGk=\033", "\007b"}, "ab"},
+		// ESC ends the OSC; the ESC and the BEL after it are output.
+		{"ESC alone at end, BEL next", []string{"a\033]52;c;aGk=\033", "\007b"}, "a\033\007b"},
+		{"ended by CSI", []string{"a\033]52;c;aGk=\033[31mb"}, "a\033[31mb"},
+		{"ended by CSI, split after ESC", []string{"a\033]52;c;aGk=\033", "[31mb"}, "a\033[31mb"},
+		{"ended by another OSC", []string{"a\033]52;c;aGk=\033]0;t\007b"}, "a\033]0;t\007b"},
+		{"ended by another OSC 52", []string{"a\033]52;c;aGk=\033]52;c;?\007b"}, "ab"},
+		{"CAN", []string{"a\033]52;c;aGk=\030b"}, "ab"},
+		{"SUB", []string{"a\033]52;c;aGk=\032b"}, "ab"},
+		{"byte at a time, ended by CSI", split1("a\033]52;c;aGk=\033[31mb"), "a\033[31mb"},
 		{"byte at a time, ST", split1("a\033]52;c;aGk=\033\\b"), "ab"},
 		{"byte at a time, BEL", split1("a\033]52;c;?\007b"), "ab"},
 		{"other OSC kept", []string{"a\033]0;title\007b"}, "a\033]0;title\007b"},
@@ -177,4 +185,33 @@ func split1(s string) []string {
 		out[i] = s[i : i+1]
 	}
 	return out
+}
+
+func TestShellWriteCtrlCBreaksSequence(t *testing.T) {
+	defer withTempHome(t)()
+	sess := MakeSession("ctrlcsess", "")
+	defer sess.Remove()
+
+	devnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devnull.Close()
+
+	s := NewShell(sess)
+	s.pty = devnull
+	s.eb.Write([]byte("a\033]52;c;never ending"))
+	s.eb.Write([]byte("lost"))
+	if _, err := s.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	s.eb.Write([]byte("lost too"))
+	if _, err := s.Write([]byte("x\003y")); err != nil {
+		t.Fatal(err)
+	}
+	s.eb.Write([]byte("b"))
+	s.eb.Flush()
+	if got, want := string(s.eb.normal), "ab"; got != want {
+		t.Errorf("recorded %q, want %q", got, want)
+	}
 }

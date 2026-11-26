@@ -41,6 +41,7 @@ type seqCall struct {
 	seq      []byte
 	terms    [][]byte // each terminates the sequence; the earliest wins
 	maxTerm  int      // length of the longest of terms
+	ends     string   // bytes that end the sequence but are not part of it
 	seen     []byte   // bytes we have seen so far
 	callback func(*EscapeBuffer, []byte) bool
 }
@@ -85,15 +86,19 @@ func (e *EscapeBuffer) AddSequence(seq string, f func(*EscapeBuffer) bool) {
 // returns true, and then without seq and term.  An empty term makes it the
 // same as AddSequence.
 func (e *EscapeBuffer) AddReportSequence(seq, term string, f func(*EscapeBuffer, []byte) bool) {
-	e.AddReportSequenceTerms(seq, []string{term}, f)
+	e.AddReportSequenceTerms(seq, []string{term}, "", f)
 }
 
 // AddReportSequenceTerms is AddReportSequence for a sequence that may end
-// with any one of terms (for example an OSC, which ends with BEL or ESC \).
-// Empty strings in terms are ignored.
+// with any one of terms, or just before any byte in ends.  A byte from ends
+// is not part of the sequence: it is processed again as ordinary output (for
+// an OSC, ESC is such a byte, as it starts the next escape sequence).  Where
+// a term and a byte from ends start at the same place, the term wins, so a
+// term may begin with a byte from ends (as ST, ESC \, does).  Empty strings
+// in terms are ignored.
 //
 // A terminator is found even when it is split across calls to Write.
-func (e *EscapeBuffer) AddReportSequenceTerms(seq string, terms []string, f func(*EscapeBuffer, []byte) bool) {
+func (e *EscapeBuffer) AddReportSequenceTerms(seq string, terms []string, ends string, f func(*EscapeBuffer, []byte) bool) {
 	if len(seq) == 0 {
 		return
 	}
@@ -107,7 +112,7 @@ func (e *EscapeBuffer) AddReportSequenceTerms(seq string, terms []string, f func
 			}
 		}
 	}
-	if len(bterms) == 0 {
+	if len(bterms) == 0 && ends == "" {
 		e.AddSequence(seq, func(*EscapeBuffer) bool {
 			return f(e, nil)
 		})
@@ -121,6 +126,7 @@ func (e *EscapeBuffer) AddReportSequenceTerms(seq string, terms []string, f func
 		seq:      []byte(seq),
 		terms:    bterms,
 		maxTerm:  maxTerm,
+		ends:     ends,
 		callback: f,
 	})
 }
@@ -135,6 +141,33 @@ func indexTerm(buf []byte, terms [][]byte) (int, int) {
 		}
 	}
 	return x, n
+}
+
+// findEnd looks for the end of s in s.seen, starting at from.  It returns
+// where the sequence's own bytes end and how many bytes after that belong to
+// its terminator (0 if it ended before a byte from s.ends).  It returns
+// -1, 0 if the end is not in s.seen yet.
+func (s *seqCall) findEnd(from int) (int, int) {
+	x, tl := indexTerm(s.seen[from:], s.terms)
+	if x >= 0 {
+		x += from
+	}
+	y := bytes.IndexAny(s.seen[from:], s.ends)
+	if y < 0 {
+		return x, tl
+	}
+	y += from
+	if x >= 0 && x <= y {
+		return x, tl
+	}
+	// A term may yet start at y once more bytes arrive.
+	rest := s.seen[y:]
+	for _, t := range s.terms {
+		if len(rest) < len(t) && bytes.HasPrefix(t, rest) {
+			return -1, 0
+		}
+	}
+	return y, 0
 }
 
 func appendto(old, new []byte) []byte {
@@ -161,6 +194,18 @@ func appendto(old, new []byte) []byte {
 		old = append(old, new...)
 	}
 	return old
+}
+
+// Break abandons the report sequence in progress, if any, discarding what
+// it has seen, and reports whether there was one.  It is how a sequence that
+// never ends (a program that died or misbehaved part way through an OSC) is
+// stopped from swallowing all later output from the record.
+func (e *EscapeBuffer) Break() bool {
+	if e.inseq == nil {
+		return false
+	}
+	e.inseq = nil
+	return true
 }
 
 func (e *EscapeBuffer) Flush() {
@@ -226,11 +271,10 @@ Loop:
 				from = 0
 			}
 			seq.seen = append(seq.seen, buf...)
-			x, tl := indexTerm(seq.seen[from:], seq.terms)
+			x, tl := seq.findEnd(from)
 			if x < 0 {
 				return n, nil
 			}
-			x += from
 			e.inseq = nil
 			if seq.callback(e, seq.seen[:x]) {
 				e.add(seq.seen[:x])
@@ -250,7 +294,7 @@ Loop:
 		for _, s := range e.sequences {
 			if len(buf) >= len(s.seq) {
 				if bytes.Equal(buf[:len(s.seq)], s.seq) {
-					if len(s.terms) > 0 {
+					if len(s.terms) > 0 || s.ends != "" {
 						seq := s
 						e.inseq = &seq
 					} else if s.callback(e, nil) {

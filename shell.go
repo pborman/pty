@@ -118,6 +118,7 @@ const (
 	cls     = nsbrc + edb0 + edsaved + edb0
 	home    = "\033[H"
 	sendSSH = "\033[z"
+	ctrlC   = '\003'
 
 	// ropenQuery is how ropen asks an iPadSSH terminal for its current
 	// receiver address.  The terminal answers by typing
@@ -134,6 +135,14 @@ const (
 	// whatever is reading input, so it is passed to the attached
 	// clients but never recorded.
 	osc52 = "\033]52;"
+)
+
+// An OSC 52 ends the way a terminal ends any OSC: with BEL or ST (ESC \),
+// aborted by CAN or SUB, or just before any other ESC, which starts the next
+// escape sequence (including another OSC).
+var (
+	osc52Terms = []string{"\007", "\033\\", "\030", "\032"}
+	osc52Ends  = "\033"
 )
 
 // A ShellClient can be attached to a Shell.
@@ -204,7 +213,7 @@ func NewShell(session *Session) *Shell {
 	s.eb.AddSequence(ropenQuery, func(eb *EscapeBuffer) bool {
 		return false
 	})
-	s.eb.AddReportSequenceTerms(osc52, []string{"\007", "\033\\"}, func(*EscapeBuffer, []byte) bool {
+	s.eb.AddReportSequenceTerms(osc52, osc52Terms, osc52Ends, func(*EscapeBuffer, []byte) bool {
 		return false
 	})
 	s.eb.AddSequence(scasb, func(eb *EscapeBuffer) bool {
@@ -337,7 +346,20 @@ func (s *Shell) detach(c *Client) {
 	}
 }
 
+// Write writes buf, input from a client, to the shell.
+//
+// A ^C in buf breaks any unterminated report sequence (such as an OSC 52)
+// the recorder is in the middle of, so that output from then on is recorded
+// again.  This is done before buf is written so that the program's response
+// to the ^C is recorded.
 func (s *Shell) Write(buf []byte) (int, error) {
+	if bytes.IndexByte(buf, ctrlC) >= 0 {
+		unlock := s.mu.Lock("Write")
+		if s.eb.Break() {
+			log.Infof("^C broke an unterminated escape sequence")
+		}
+		unlock()
+	}
 	n, err := s.pty.Write(buf)
 	if err != nil {
 		log.DepthErrorf(1, "pty write: %v", err)
