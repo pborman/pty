@@ -153,7 +153,7 @@ func (s *Shell) attach(c net.Conn) {
 				}
 				client.SetName(name)
 			case dumpMessage:
-				log.DumpGoroutines()
+				log.ForceDumpGoroutines()
 				var buf bytes.Buffer
 				mutex.Dump(&buf)
 				log.Infof("%s\n", buf.String())

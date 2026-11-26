@@ -145,6 +145,12 @@ func (log *Logger) SetVerbose(v bool) {
 	log.verbose.Store(v)
 }
 
+// isVerbose reports whether debug output is enabled.  A nil Logger, which
+// writes to stderr, is never verbose.
+func (log *Logger) isVerbose() bool {
+	return log != nil && log.verbose.Load()
+}
+
 func TakeStderr() {
 	if f, ok := logger.fd.(*os.File); ok {
 		Infof("Taking over stderr")
@@ -245,7 +251,7 @@ func last2(path string) string {
 }
 
 func (log *Logger) Outputf(depth int, prefix string, format string, v ...interface{}) {
-	if prefix == "D" && !log.verbose.Load() {
+	if prefix == "D" && !log.isVerbose() {
 		return
 	}
 	_, file, line, ok := runtime.Caller(depth + 1)
@@ -292,8 +298,10 @@ func (log *Logger) Warnf(format string, v ...interface{})  { log.Outputf(1, "W",
 func (log *Logger) Infof(format string, v ...interface{})  { log.Outputf(1, "I", format, v...) }
 func (log *Logger) Debugf(format string, v ...interface{}) { log.Outputf(1, "D", format, v...) }
 
-func (log *Logger) DumpGoroutines() {
-	if !log.verbose.Load() {
+// ForceDumpGoroutines dumps all goroutines whether or not verbose is on.  A
+// nil Logger has no file to dump to and does nothing.
+func (log *Logger) ForceDumpGoroutines() {
+	if log == nil {
 		return
 	}
 	if p := pprof.Lookup("goroutine"); p != nil {
@@ -310,8 +318,15 @@ func (log *Logger) DumpGoroutines() {
 	}
 }
 
+func (log *Logger) DumpGoroutines() {
+	if !log.isVerbose() {
+		return
+	}
+	log.ForceDumpGoroutines()
+}
+
 func (log *Logger) DumpStack() {
-	if !log.verbose.Load() {
+	if !log.isVerbose() {
 		return
 	}
 	n := 15
@@ -330,5 +345,6 @@ func (log *Logger) DumpStack() {
 
 }
 
-func DumpGoroutines() { logger.DumpGoroutines() }
-func DumpStack()      { logger.DumpStack() }
+func DumpGoroutines()      { logger.DumpGoroutines() }
+func ForceDumpGoroutines() { logger.ForceDumpGoroutines() }
+func DumpStack()           { logger.DumpStack() }

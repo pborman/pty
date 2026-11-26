@@ -103,9 +103,10 @@ func TestCommandDumpNilLogger(t *testing.T) {
 	defer withTempHome(t)()
 	sess := MakeSession("dump", "")
 	defer sess.Remove()
+	// A nil package logger has no file to dump to, so dump does nothing.
 	defer func() {
-		if recover() == nil {
-			t.Error("command dump with a nil package logger did not panic")
+		if r := recover(); r != nil {
+			t.Errorf("command dump with a nil package logger panicked: %v", r)
 		}
 	}()
 	command(false, sess, NewMessengerWriter(&bytes.Buffer{}), "dump")

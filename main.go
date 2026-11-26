@@ -618,7 +618,7 @@ func command(raw bool, session *Session, w *MessengerWriter, args ...string) {
 		if raw {
 			w.Send(dumpMessage, nil)
 		} else {
-			log.DumpGoroutines()
+			log.ForceDumpGoroutines()
 		}
 	case "env", "getenv":
 		if raw {

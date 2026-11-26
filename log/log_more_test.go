@@ -15,6 +15,7 @@
 package log
 
 import (
+	"bytes"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -62,11 +63,47 @@ func TestPackageLogFuncs(t *testing.T) {
 	DepthWarnf(0, "depth-warn")
 	DepthErrorf(0, "depth-err")
 	Outputf(1, "X", "outputf %d", 1)
+	Debugf("pkg-debug")
+	DumpStack()
+	DumpGoroutines()
+	ForceDumpGoroutines()
 }
 
 func TestOutputfNilLogger(t *testing.T) {
 	var lg *Logger
 	lg.Outputf(1, "I", "nil logger %s", "ok")
+	// A nil Logger is not verbose: these must neither panic nor write.
+	lg.Debugf("nil logger debug")
+	lg.DumpStack()
+	lg.DumpGoroutines()
+}
+
+type bufCloser struct{ bytes.Buffer }
+
+func (*bufCloser) Close() error { return nil }
+
+func TestForceDumpGoroutines(t *testing.T) {
+	for _, verbose := range []bool{false, true} {
+		var buf bufCloser
+		lg := &Logger{fd: &buf}
+		lg.SetVerbose(verbose)
+
+		lg.DumpGoroutines()
+		if got := buf.Len() > 0; got != verbose {
+			t.Errorf("verbose=%v: DumpGoroutines wrote output: %v", verbose, got)
+		}
+		buf.Reset()
+
+		lg.ForceDumpGoroutines()
+		if !strings.Contains(buf.String(), "TestForceDumpGoroutines") {
+			t.Errorf("verbose=%v: ForceDumpGoroutines did not dump this goroutine:\n%s", verbose, buf.String())
+		}
+		if got := lg.isVerbose(); got != verbose {
+			t.Errorf("verbose=%v: after ForceDumpGoroutines verbose is %v", verbose, got)
+		}
+	}
+	var nl *Logger
+	nl.ForceDumpGoroutines() // must not panic
 }
 
 func TestPrune(t *testing.T) {
