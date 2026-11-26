@@ -207,7 +207,7 @@ The other way is `^P : ssh` at a shell prompt, which types the current
 ## Configuration
 
 pty reads `~/.pty/config.yaml` when it starts.  Besides `forward` above, it
-can have a `shells` list and a `sequences` list.
+can have a `shells` list, a `sequences` list and a `close_timeout`.
 
 `shells` lists the shells a new session may run, in the order you prefer
 them:
@@ -224,6 +224,17 @@ finds.  In the session, `$SHELL` is set to the shell pty chose, so programs
 that start a shell start the same one.  The choice is made when the session
 is created, so changing the list does not affect sessions that are already
 running.  Typing `shell` at the session menu runs the same shell.
+
+`close_timeout` is how long a session waits, when it closes a terminal's
+connection, for that terminal to take the output still waiting for it:
+
+    close_timeout: 30s
+
+It is 5 seconds unless you say otherwise.  A terminal that has not caught up
+by then (it is stopped with `^S`, or the link to it is dead or very slow) is
+disconnected anyway and loses the rest.  Raise it if you attach over slow
+links and lose the end of the output when you are detached.  Like `shells`,
+it is read when the session is created.
 
 Each entry in `sequences` names more sequences to keep out of the record,
 and optionally the answer the terminal gives to each, which is then passed on

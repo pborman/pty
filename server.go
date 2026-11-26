@@ -129,7 +129,7 @@ func (s *Shell) attach(c net.Conn) {
 				unlock()
 				for _, oc := range clients {
 					s.Detach(oc)
-					oc.Output([]byte(fmt.Sprintf("\r\nDetached by client %s\r\n", client.Name())))
+					oc.OutputFinal([]byte(fmt.Sprintf("\r\nDetached by client %s\r\n", client.Name())))
 					checkClose(oc)
 				}
 			case askCountMessage:

@@ -21,7 +21,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/pborman/pty/log"
 	"github.com/pborman/pty/mutex"
@@ -36,6 +38,11 @@ type mBuffer struct {
 	// clientQueueLimit cannot put the client behind again before it
 	// has been written.
 	resync bool
+
+	// final is set on output queued by OutputFinal.  It is queued even
+	// while the client is behind, is not counted in Client.queued, and
+	// is not thrown away by dropOutput.
+	final bool
 }
 
 // clientQueueLimit is the most terminal output, in bytes, that is queued for
@@ -45,6 +52,15 @@ type mBuffer struct {
 // behind; once its socket accepts writes again it is sent the recorded
 // screen, as when it attached.  Tests change it.
 var clientQueueLimit = 4 << 20
+
+// clientCloseTimeout is how long, as a time.Duration, Client.Close waits for
+// the client's queued output to be written.  A client that has not taken it
+// by then is not reading, and its connection is closed under it.  It is 5
+// seconds unless close_timeout in config.yaml says otherwise.  Tests change
+// it; it is atomic because clients from earlier tests may still be closing.
+var clientCloseTimeout atomic.Int64
+
+func init() { clientCloseTimeout.Store(int64(5 * time.Second)) }
 
 // A Client represents an incoming client for a shell.
 type Client struct {
@@ -108,6 +124,24 @@ func (c *Client) Send(kind messageKind, buf []byte) bool {
 	return true
 }
 
+// OutputFinal queues buf, the last terminal output for a client that is
+// going away (such as the message telling it it was detached), even if the
+// client is behind: the screen it missed is not going to be resent, but it
+// should still be told why it is being closed.  OutputFinal never blocks.
+func (c *Client) OutputFinal(buf []byte) {
+	defer c.mu.Lock("OutputFinal")()
+	c.outputFinal(buf)
+}
+
+// outputFinal is OutputFinal for a caller already holding c.mu.
+func (c *Client) outputFinal(buf []byte) {
+	if len(buf) == 0 {
+		return
+	}
+	c.buffers = append(c.buffers, mBuffer{kind: dataMessage, data: buf, final: true})
+	c.wake()
+}
+
 // SendLocked implements ShellClient.  It is Send for a caller already holding
 // c.mu.
 func (c *Client) SendLocked(kind messageKind, buf []byte) bool {
@@ -144,7 +178,7 @@ func (c *Client) dropOutput() {
 	log.Infof("client %s is not reading; dropping %d bytes of output", c.name, c.queued)
 	kept := c.buffers[:0]
 	for _, b := range c.buffers {
-		if b.kind != dataMessage {
+		if b.kind != dataMessage || b.final {
 			kept = append(kept, b)
 		}
 	}
@@ -171,12 +205,25 @@ func (c *Client) wake() {
 // Close implements ShellClient and io.Closer.  It writes whatever output
 // is still queued, stops the client's output goroutine and closes c.out.
 // It is safe to call more than once and from more than one goroutine; every
-// call returns only after the queued output has been written.  Close always
-// returns nil.
+// call returns only after the queued output has been written, or after
+// clientCloseTimeout if the client is not taking it.  Close always returns
+// nil.
+//
+// A client that is not reading leaves the output goroutine blocked in a
+// write.  Close then closes c.out anyway, which makes that write fail (for
+// a net.Conn, Close unblocks pending writes), and the goroutine finishes:
+// what is left in the queue fails to write at once.  A c.out that cannot be
+// closed is left to its writer.
 func (c *Client) Close() error {
 	c.once.Do(func() {
 		close(c.quit)
-		<-c.done
+		t := time.NewTimer(time.Duration(clientCloseTimeout.Load()))
+		defer t.Stop()
+		select {
+		case <-c.done:
+		case <-t.C:
+			log.Warnf("client %s is not reading; closing it with output still queued", c.Name())
+		}
 		checkClose(c.out)
 	})
 	return nil
@@ -224,7 +271,7 @@ func (c *Client) nextBuf() mBuffer {
 	buf := c.buffers[0]
 	c.buffers[0] = mBuffer{}
 	c.buffers = c.buffers[1:]
-	if buf.kind == dataMessage && !buf.resync {
+	if buf.kind == dataMessage && !buf.resync && !buf.final {
 		c.queued -= len(buf.data)
 	}
 	return buf

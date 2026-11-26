@@ -15,9 +15,11 @@
 package main
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"time"
 
 	yaml "gopkg.in/yaml.v2"
 )
@@ -26,6 +28,11 @@ var config = struct {
 	Forward   []string
 	Sequences []SequenceConfig // see sequences.go
 	Shells    []string
+
+	// CloseTimeout is how long the server waits for a client that is
+	// being closed to take its queued output (see clientCloseTimeout).
+	// Zero, or leaving it out, keeps the default.
+	CloseTimeout time.Duration `yaml:"close_timeout"`
 }{}
 
 func ReadConfig() error {
@@ -44,5 +51,11 @@ func ReadConfig() error {
 		return err
 	}
 	seqRules = rules
+	switch {
+	case config.CloseTimeout < 0:
+		return fmt.Errorf("close_timeout: %v is negative", config.CloseTimeout)
+	case config.CloseTimeout > 0:
+		clientCloseTimeout.Store(int64(config.CloseTimeout))
+	}
 	return nil
 }

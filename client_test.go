@@ -398,3 +398,98 @@ func TestClientKeepingUp(t *testing.T) {
 		t.Errorf("client got %d bytes, want %d", len(buf.buf), len(want))
 	}
 }
+
+// shortCloseTimeout sets clientCloseTimeout to d for the rest of the test.
+func shortCloseTimeout(t *testing.T, d time.Duration) {
+	old := clientCloseTimeout.Load()
+	clientCloseTimeout.Store(int64(d))
+	t.Cleanup(func() { clientCloseTimeout.Store(old) })
+}
+
+// closeWithin calls c.Close and fails the test if it does not return within
+// d.
+func closeWithin(t *testing.T, c *Client, d time.Duration) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		c.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+		t.Fatalf("Client.Close did not return within %v", d)
+	}
+}
+
+// Close on a client whose writer never takes anything returns once
+// clientCloseTimeout has passed.
+func TestClientCloseStalled(t *testing.T) {
+	shortCloseTimeout(t, 50*time.Millisecond)
+	g := newGateWriter()
+	defer close(g.open) // let the output goroutine go
+	c := NewClient(g)
+	c.Output([]byte("stuck"))
+	<-g.started
+	closeWithin(t, c, 2*time.Second)
+}
+
+// Close on a client whose peer never reads closes the connection, which
+// ends the write the output goroutine was blocked in.
+func TestClientCloseStalledConn(t *testing.T) {
+	shortCloseTimeout(t, 50*time.Millisecond)
+	server, peer := net.Pipe()
+	defer peer.Close()
+	c := NewClient(NewMessengerWriter(server))
+	c.Output([]byte("stuck"))
+	c.Send(serverMessage, []byte("also stuck"))
+	closeWithin(t, c, 2*time.Second)
+	select {
+	case <-c.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the output goroutine is still blocked after Close")
+	}
+	peer.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := peer.Read(make([]byte, 1)); err != io.EOF {
+		t.Errorf("peer read after Close = %v, want EOF", err)
+	}
+}
+
+// A client that is reading gets everything queued before Close.
+func TestClientCloseFlushes(t *testing.T) {
+	server, peer := net.Pipe()
+	defer peer.Close()
+	c := NewClient(NewMessengerWriter(server))
+	want := bytes.Repeat([]byte("0123456789"), 10000)
+	c.Output(want)
+	c.Output([]byte("end"))
+	got := make(chan []byte)
+	go func() {
+		data, _ := ioutil.ReadAll(NewMessengerReader(peer, nil))
+		got <- data
+	}()
+	closeWithin(t, c, 5*time.Second)
+	if data := <-got; string(data) != string(want)+"end" {
+		t.Errorf("peer got %d bytes, want %d", len(data), len(want)+3)
+	}
+}
+
+// OutputFinal reaches a client that is behind, whose other output is being
+// dropped.
+func TestClientOutputFinalBehind(t *testing.T) {
+	defer func(n int) { clientQueueLimit = n }(clientQueueLimit)
+	clientQueueLimit = 16
+	g := newGateWriter()
+	c := NewClient(g)
+	c.Output([]byte("first"))
+	<-g.started // the output goroutine is blocked writing "first"
+	c.Output(bytes.Repeat([]byte("x"), 20))
+	c.Output([]byte("lost"))
+	c.OutputFinal([]byte("bye"))
+	c.Output(bytes.Repeat([]byte("y"), 20))
+	close(g.open)
+	closeWithin(t, c, 5*time.Second)
+	if got := string(g.bytes()); got != "firstbye" {
+		t.Errorf("client got %q, want %q", got, "firstbye")
+	}
+}

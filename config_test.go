@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestReadConfigMissing(t *testing.T) {
@@ -72,5 +73,47 @@ func TestReadConfigUnreadable(t *testing.T) {
 	}
 	if err := ReadConfig(); err == nil {
 		t.Error("directory-as-config succeeded")
+	}
+}
+
+// TestReadConfigCloseTimeout checks that close_timeout sets how long Close
+// waits, that leaving it out keeps the default, and that a negative or
+// malformed one is an error.
+func TestReadConfigCloseTimeout(t *testing.T) {
+	defer withTempHome(t)()
+	old := config
+	defer func() { config = old }()
+	oldTimeout := clientCloseTimeout.Load()
+	defer clientCloseTimeout.Store(oldTimeout)
+
+	dir := filepath.Join(user.HomeDir, rcdir)
+	os.MkdirAll(dir, 0700)
+	read := func(text string) error {
+		config.CloseTimeout = 0
+		if err := ioutil.WriteFile(filepath.Join(dir, "config.yaml"), []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return ReadConfig()
+	}
+
+	if err := read("forward:\n  - FOO\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got := clientCloseTimeout.Load(); got != oldTimeout {
+		t.Errorf("without close_timeout: %v, want %v", time.Duration(got), time.Duration(oldTimeout))
+	}
+	if err := read("close_timeout: 1m30s\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := time.Duration(clientCloseTimeout.Load()), 90*time.Second; got != want {
+		t.Errorf("close_timeout: 1m30s gave %v, want %v", got, want)
+	}
+	for _, bad := range []string{"close_timeout: -1s\n", "close_timeout: soon\n"} {
+		if err := read(bad); err == nil {
+			t.Errorf("%q: no error", bad)
+		}
+	}
+	if got, want := time.Duration(clientCloseTimeout.Load()), 90*time.Second; got != want {
+		t.Errorf("a bad close_timeout changed the timeout to %v", got)
 	}
 }
