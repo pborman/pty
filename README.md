@@ -31,13 +31,14 @@ The first time you run pty there are no sessions, so it asks for a name:
 
 Press return to take the suggested name, or type your own.  A name can use
 letters, digits, spaces and `_ - . + ! = : [ ] < > { }`.  It cannot start with
-a dot and cannot be `log`.  Typing `shell` (or `sh`) just runs your login shell
+a dot and cannot be `log`.  Typing `shell` (or `sh`) just runs your shell
 without pty, which is handy when you ssh in for something quick.
 
 pty then starts a server for the session in the background.  The server starts
-your login shell on a new pseudo-terminal, and your pty connects to it.  When
-you disconnect, the server and the shell keep running.  A session ends when its
-shell exits.
+your shell, as a login shell, on a new pseudo-terminal, and your pty connects
+to it.  Your shell is your `$SHELL` unless you pick another (see `shells` under
+Configuration).  When you disconnect, the server and the shell keep running.
+A session ends when its shell exits.
 
 When there are sessions already, pty lists them and asks which one you want:
 
@@ -207,10 +208,28 @@ for the same thing by writing `ESC [ z`.
 ## Configuration
 
 pty reads `~/.pty/config.yaml` when it starts.  Besides `forward` above, it
-can have a `sequences` list.  Each entry names more sequences to keep out of
-the record, and optionally the answer the terminal gives to each, which is
-then passed on from one terminal only.  You only need this for something pty
-does not already know about, usually a private sequence of some terminal.
+can have a `shells` list and a `sequences` list.
+
+`shells` lists the shells a new session may run, in the order you prefer
+them:
+
+    shells:
+      - /opt/homebrew/bin/bash
+      - /bin/zsh
+
+pty uses the first one it can run.  A name without a slash, such as `fish`,
+is looked up in your `PATH`.  If you list none, or none of them can be run,
+pty uses your `$SHELL`, and failing that the first of `/usr/bin/ksh`,
+`/bin/ksh`, `/bin/sh`, `/usr/bin/bash`, `/bin/bash` and `/bin/zsh` that it
+finds.  In the session, `$SHELL` is set to the shell pty chose, so programs
+that start a shell start the same one.  The choice is made when the session
+is created, so changing the list does not affect sessions that are already
+running.  Typing `shell` at the session menu runs the same shell.
+
+Each entry in `sequences` names more sequences to keep out of the record,
+and optionally the answer the terminal gives to each, which is then passed on
+from one terminal only.  You only need this for something pty does not
+already know about, usually a private sequence of some terminal.
 
     sequences:
       # An OSC: no end needed

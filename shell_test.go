@@ -16,9 +16,117 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// TestMain selects the login shell as main does, since tests such as
+// TestNewShellAndSetenv need one.
+func TestMain(m *testing.M) {
+	SelectLoginShell(nil)
+	os.Exit(m.Run())
+}
+
+func TestSelectLoginShell(t *testing.T) {
+	dir := t.TempDir()
+	shell := func(name string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	cfg1, cfg2, env, base1, base2 := shell("cfg1"), shell("cfg2"), shell("env"), shell("base1"), shell("base2")
+	missing := filepath.Join(dir, "missing")
+	notExec := filepath.Join(dir, "notexec")
+	if err := os.WriteFile(notExec, []byte("#!/bin/sh\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	subdir := filepath.Join(dir, "subdir")
+	if err := os.Mkdir(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Bare names are looked up in $PATH.
+	t.Setenv("PATH", dir)
+
+	oldBase, oldLogin := baseShells, LoginShell
+	defer func() { baseShells, LoginShell = oldBase, oldLogin }()
+
+	for _, tt := range []struct {
+		name   string
+		config []string
+		base   []string // baseShells: $SHELL, then the built-in list
+		want   string
+	}{
+		{"config first", []string{cfg1, cfg2}, []string{env, base1}, cfg1},
+		{"missing config skipped", []string{missing, cfg2}, []string{env, base1}, cfg2},
+		{"no config uses $SHELL", nil, []string{env, base1}, env},
+		{"no config found uses $SHELL", []string{missing}, []string{env, base1}, env},
+		{"empty entries skipped", []string{""}, []string{"", base1}, base1},
+		{"$SHELL missing", nil, []string{missing, base1, base2}, base1},
+		{"built-in list in order", nil, []string{"", missing, base2, base1}, base2},
+		{"none", []string{missing}, []string{"", missing}, ""},
+		{"directory skipped", []string{subdir, cfg2}, []string{env}, cfg2},
+		{"not executable skipped", []string{notExec}, []string{env}, env},
+		{"name found in $PATH", []string{"cfg2"}, []string{env}, cfg2},
+		{"name not in $PATH", []string{"missing", "notexec"}, []string{"base1"}, base1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			baseShells = tt.base
+			LoginShell = ""
+			SelectLoginShell(tt.config)
+			if LoginShell != tt.want {
+				t.Errorf("LoginShell = %q, want %q", LoginShell, tt.want)
+			}
+		})
+	}
+}
+
+func TestShellEnv(t *testing.T) {
+	got := shellEnv([]string{"A=1", "SHELL=/bin/ksh", "B=2", "SHELLX=y"}, "/bin/zsh")
+	want := []string{"SHELL=/bin/zsh", "A=1", "B=2", "SHELLX=y"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("shellEnv = %q, want %q", got, want)
+	}
+	if got := shellEnv(nil, "/bin/sh"); fmt.Sprint(got) != "[SHELL=/bin/sh]" {
+		t.Errorf("shellEnv(nil) = %q", got)
+	}
+}
+
+// TestBaseShells checks that $SHELL comes before the built-in shells.
+func TestBaseShells(t *testing.T) {
+	if baseShells[0] != os.Getenv("SHELL") {
+		t.Errorf("baseShells[0] = %q, want $SHELL (%q)", baseShells[0], os.Getenv("SHELL"))
+	}
+	for _, sh := range baseShells[1:] {
+		if !filepath.IsAbs(sh) {
+			t.Errorf("built-in shell %q is not an absolute path", sh)
+		}
+	}
+}
+
+// TestReadConfigShells checks that the shells list is read from config.yaml.
+func TestReadConfigShells(t *testing.T) {
+	defer withTempHome(t)()
+	oldConfig, oldRules := config, seqRules
+	defer func() { config, seqRules = oldConfig, oldRules }()
+	dir := filepath.Join(user.HomeDir, rcdir)
+	os.MkdirAll(dir, 0700)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("shells:\n  - /opt/bin/zsh\n  - /bin/zsh\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReadConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Shells) != 2 || config.Shells[0] != "/opt/bin/zsh" || config.Shells[1] != "/bin/zsh" {
+		t.Errorf("config.Shells = %q", config.Shells)
+	}
+}
 
 func TestNewShellAndSetenv(t *testing.T) {
 	defer withTempHome(t)()
@@ -110,9 +218,24 @@ func TestShellStartAlreadyStarted(t *testing.T) {
 	sess := MakeSession("started", "")
 	defer sess.Remove()
 	s := NewShell(sess)
+	s.Shell = "/bin/example-sh"
+	s.Setenv("SHELL", "/bin/client-sh")
 	s.pty = os.Stdin
 	if err := s.Start(false); err == nil {
 		t.Error("Start on already-started shell succeeded")
+	}
+	// Start sets $SHELL to the shell the session runs.
+	n := 0
+	for _, e := range s.Env {
+		if len(e) > 6 && e[:6] == "SHELL=" {
+			n++
+			if e != "SHELL=/bin/example-sh" {
+				t.Errorf("Env has %q, want SHELL=/bin/example-sh", e)
+			}
+		}
+	}
+	if n != 1 {
+		t.Errorf("SHELL is in Env %d times", n)
 	}
 }
 
@@ -213,5 +336,29 @@ func TestShellWriteCtrlCBreaksSequence(t *testing.T) {
 	s.eb.Flush()
 	if got, want := string(s.eb.normal), "ab"; got != want {
 		t.Errorf("recorded %q, want %q", got, want)
+	}
+}
+
+// TestExecsh runs execsh in a child process, with LoginShell set to a script
+// that prints its name and $SHELL.
+func TestExecsh(t *testing.T) {
+	if sh := os.Getenv("PTY_TEST_EXECSH"); sh != "" {
+		LoginShell = sh
+		execsh()
+		return
+	}
+	script := filepath.Join(t.TempDir(), "mysh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho \"$0 $SHELL\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestExecsh$")
+	cmd.Env = append(os.Environ(), "PTY_TEST_EXECSH="+script, "SHELL=/bin/client-sh")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	// /bin/sh sets $0 to the script's path, not to argv[0].
+	if got, want := strings.TrimSpace(string(out)), script+" "+script; got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

@@ -63,12 +63,23 @@ func splur(s int) string {
 	return "s"
 }
 
-var loginShell = os.Getenv("SHELL")
-
+// execsh runs LoginShell as a login shell in place of pty, with $SHELL set
+// to it.
 func execsh() {
-	sh := "-" + filepath.Base(loginShell)
-	err := syscall.Exec(loginShell, []string{sh}, os.Environ())
+	sh := "-" + filepath.Base(LoginShell)
+	err := syscall.Exec(LoginShell, []string{sh}, shellEnv(os.Environ(), LoginShell))
 	exitf("exec failed with %v", err)
+}
+
+// shellEnv returns env with SHELL set to shell.
+func shellEnv(env []string, shell string) []string {
+	out := []string{"SHELL=" + shell}
+	for _, e := range env {
+		if !strings.HasPrefix(e, "SHELL=") {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // Select session returns the path to the selected session.  If the returned
@@ -97,7 +108,7 @@ func SelectSession(id string) (*Session, error) {
 	}
 
 	if len(sessions) == 0 {
-		if loginShell != "" {
+		if LoginShell != "" {
 			fmt.Printf("Name of session to create (or shell) [%s]: ", nextSession)
 		} else {
 			fmt.Printf("Name of session to create [%s]: ", nextSession)
@@ -106,7 +117,7 @@ func SelectSession(id string) (*Session, error) {
 		if err != nil {
 			exitf("%v", err)
 		}
-		if loginShell != "" && (name == "shell" || name == "sh") {
+		if LoginShell != "" && (name == "shell" || name == "sh") {
 			execsh()
 		}
 		if name == "" {
@@ -121,8 +132,8 @@ func SelectSession(id string) (*Session, error) {
 		}
 		return s.Attach(id), nil
 	}
-	if loginShell != "" {
-		fmt.Printf("shell) Spawn %s\n", loginShell)
+	if LoginShell != "" {
+		fmt.Printf("shell) Spawn %s\n", LoginShell)
 	}
 	if opts.Auto {
 		if id != "" {
@@ -184,11 +195,11 @@ Loop:
 			}
 		}
 		if name == "shell" || name == "sh" {
-			if loginShell == "" {
+			if LoginShell == "" {
 				exitf("$SHELL not set.")
 			}
 			execsh()
-			exitf("failed to exec %v", loginShell)
+			exitf("failed to exec %v", LoginShell)
 
 		}
 		if n, err := strconv.Atoi(name); err == nil {

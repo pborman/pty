@@ -33,8 +33,11 @@ import (
 	"github.com/pborman/pty/mutex"
 )
 
+// LoginShell is the shell a new session runs, chosen by SelectLoginShell.
 var LoginShell string
 
+// baseShells are the shells tried after those in the configuration: $SHELL,
+// then a built-in list.
 var baseShells = []string{
 	os.Getenv("SHELL"),
 	"/usr/bin/ksh",
@@ -45,14 +48,20 @@ var baseShells = []string{
 	"/bin/zsh",
 }
 
+// SelectLoginShell sets LoginShell to the first of shells, and then of
+// baseShells, that is an executable file.  A name without a slash is looked
+// up in $PATH, and LoginShell is set to its full path.  Empty names are
+// skipped.  LoginShell is left unchanged if none is found.
 func SelectLoginShell(shells []string) {
-	for _, shell := range append(shells, baseShells...) {
-		if shell == "" {
-			continue
-		}
-		if _, err := os.Stat(shell); err == nil {
-			LoginShell = shell
-			return
+	for _, list := range [][]string{shells, baseShells} {
+		for _, shell := range list {
+			if shell == "" {
+				continue
+			}
+			if p, err := exec.LookPath(shell); err == nil {
+				LoginShell = p
+				return
+			}
 		}
 	}
 }
@@ -417,6 +426,9 @@ func (s *Shell) startForwarders() {
 }
 
 func (s *Shell) Start(debug bool) error {
+	// Programs in the session that start a shell should start the
+	// one the session runs, not the one the client had in $SHELL.
+	s.Setenv("SHELL", s.Shell)
 	s.Setenv("_PTY_NAME", s.session.Name)
 	s.Setenv("_PTY_SHELL", "true")
 	s.Setenv("_PTY_SOCKET", s.session.Addr())
