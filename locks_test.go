@@ -282,9 +282,18 @@ func TestEscapeMessageStalledClient(t *testing.T) {
 		t.Fatal("the shell lock is held while writing to a stalled client")
 	}
 
-	// The client is sent the same list as before, as plain output.
-	got := make([]byte, want.Len())
+	// The client is sent the server's version, which comes first on
+	// every connection, and then the same list as before, as plain
+	// output.
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	version := make([]byte, 6+len(versionPayload()))
+	if _, err := io.ReadFull(conn, version); err != nil {
+		t.Fatalf("reading the version: %v", err)
+	}
+	if version[1] != byte(versionMessage) {
+		t.Fatalf("first message is %q, want the version", version)
+	}
+	got := make([]byte, want.Len())
 	if _, err := io.ReadFull(conn, got); err != nil {
 		t.Fatalf("reading the escape list: %v", err)
 	}

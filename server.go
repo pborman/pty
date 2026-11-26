@@ -83,6 +83,14 @@ func (s *Session) shell(debug bool) {
 func (s *Shell) attach(c net.Conn) {
 	// Attach forwards the shells output to c.
 	mw := NewMessengerWriter(c)
+
+	// Our version must be the first thing on the wire.  There are two
+	// ways to write to c: directly with mw, as the replies below are, and
+	// through client's queue, whose output goroutine also writes with mw.
+	// SendFirst locks mw before either exists, so both wait until the
+	// version is written.  It does not wait itself: c may be slow to
+	// read, and reading from c must not wait on that.
+	mw.SendFirst(versionMessage, versionPayload())
 	client := NewClient(mw)
 	defer func() {
 		go func() {
@@ -128,6 +136,10 @@ func (s *Shell) attach(c net.Conn) {
 				mw.Sendf(countMessage, "%d", s.Count())
 			case pingMessage:
 				mw.Send(ackMessage, msg)
+			case versionMessage:
+				v := parseVersion(msg)
+				log.Infof("client protocol version %d", v)
+				client.peer.set(v)
 			case ttynameMessage:
 				if !attached {
 					s.Attach(client)

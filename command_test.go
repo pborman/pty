@@ -161,17 +161,17 @@ func TestClientCommand(t *testing.T) {
 	ready := make(chan struct{})
 	close(ready)
 
-	clientCommand(w, pingMessage, []byte("0123456789abcdef"), ready, sess)
-	clientCommand(w, ackMessage, []byte("nope"), ready, sess)
-	clientCommand(w, countMessage, nil, ready, sess)
-	clientCommand(w, preemptMessage, nil, ready, sess)
-	clientCommand(w, waitMessage, nil, ready, sess)
-	clientCommand(w, startMessage, nil, ready, sess)
-	clientCommand(w, primaryMessage, nil, ready, sess)
-	clientCommand(w, messageKind(99), []byte("x"), ready, sess)
+	clientCommand(w, pingMessage, []byte("0123456789abcdef"), ready, sess, &peerVersion{})
+	clientCommand(w, ackMessage, []byte("nope"), ready, sess, &peerVersion{})
+	clientCommand(w, countMessage, nil, ready, sess, &peerVersion{})
+	clientCommand(w, preemptMessage, nil, ready, sess, &peerVersion{})
+	clientCommand(w, waitMessage, nil, ready, sess, &peerVersion{})
+	clientCommand(w, startMessage, nil, ready, sess, &peerVersion{})
+	clientCommand(w, primaryMessage, nil, ready, sess, &peerVersion{})
+	clientCommand(w, messageKind(99), []byte("x"), ready, sess, &peerVersion{})
 
 	out := captureStdout(t, func() {
-		clientCommand(w, serverMessage, []byte("from-server"), ready, sess)
+		clientCommand(w, serverMessage, []byte("from-server"), ready, sess, &peerVersion{})
 	})
 	// serverMessage writes to os.Stdout directly, not via capture of
 	// fmt.Printf. Re-run without capture by checking buf instead.
@@ -181,7 +181,7 @@ func TestClientCommand(t *testing.T) {
 	psMu.Lock()
 	psChan = pc
 	psMu.Unlock()
-	clientCommand(w, psMessage, []byte("ps-data"), ready, sess)
+	clientCommand(w, psMessage, []byte("ps-data"), ready, sess, &peerVersion{})
 	select {
 	case got := <-pc:
 		if string(got) != "ps-data" {
@@ -198,7 +198,7 @@ func TestClientCommand(t *testing.T) {
 	ackerMu.Lock()
 	ackers[key] = ch
 	ackerMu.Unlock()
-	clientCommand(w, ackMessage, key[:], ready, sess)
+	clientCommand(w, ackMessage, key[:], ready, sess, &peerVersion{})
 	select {
 	case <-ch:
 	default:
@@ -217,7 +217,7 @@ func TestPingAck(t *testing.T) {
 	// via a reader that feeds clientCommand.
 	mr := NewMessengerReader(&buf, func(kind messageKind, data []byte) {
 		if kind == pingMessage {
-			clientCommand(w, ackMessage, data, make(chan struct{}), &Session{})
+			clientCommand(w, ackMessage, data, make(chan struct{}), &Session{}, &peerVersion{})
 		}
 	})
 	// ping writes to w; we need the reader to see it. The buffer is

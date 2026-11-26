@@ -281,30 +281,17 @@ func main() {
 
 	w := NewMessengerWriter(c)
 	ready := make(chan struct{})
+	var server peerVersion // the server's protocol version
 	go func() {
 		// read from the server and write to stdout
-		mr := NewMessengerReader(c, func(kind messageKind, data []byte) {
-			clientCommand(w, kind, data, ready, session)
-		})
-		var buf [1024]byte
-		var err error
-		var n int
-
 		write := func(buf []byte) {
-			if len(buf) == 0 {
-				return
-			}
 			hexdumps.Dump("OUT", buf)
 			if _, err := os.Stdout.Write(buf); err != nil {
 				log.Errorf("Writing to stdout: %v", err)
 			}
 			tee.Write(buf)
 		}
-		for err == nil {
-			n, err = mr.Read(buf[:])
-			write(buf[:n])
-		}
-		if err != nil && err != io.EOF {
+		if err := readServer(c, w, ready, &server, session, write); err != io.EOF {
 			exitf("client exit: %v", err)
 		}
 		exit(0)
@@ -319,10 +306,14 @@ func main() {
 	var cf clearFilter
 	sendClear := func(screen []byte) {
 		hexdumps.Dump("CLR", screen)
-		w.Send(clearMessage, screen)
+		sendClear(w, &server, screen)
 	}
 	esc := escapeKey{key: session.tilde}
 	echo := func(b []byte) { os.Stdout.Write(b) }
+	// Nothing is read from stdin until the server has sent startMessage.
+	// By then the server's version is known: it is sent first, and
+	// messages are handled in order, so sendClear can tell whether the
+	// server handles clearMessage.
 	<-ready
 	for {
 		n, err := os.Stdin.Read(buf[:readSize])
@@ -439,10 +430,50 @@ func ping(w *MessengerWriter) error {
 	}
 }
 
-// clientCommand handles command recevied from the server.
-func clientCommand(w *MessengerWriter, kind messageKind, data []byte, ready chan struct{}, s *Session) {
+// readServer reads from the server on c until the read fails, passing
+// terminal output to write and messages to clientCommand.  It returns the
+// error that ended it, io.EOF if the server went away.
+func readServer(c io.Reader, w *MessengerWriter, ready chan struct{}, server *peerVersion, s *Session, write func([]byte)) error {
+	mr := NewMessengerReader(c, func(kind messageKind, data []byte) {
+		clientCommand(w, kind, data, ready, s, server)
+	})
+	var buf [1024]byte
+	for {
+		n, err := mr.Read(buf[:])
+		if n > 0 {
+			write(buf[:n])
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+// sendClear sends screen, from a clear sequence the terminal sent (see
+// clear.go), to the server in a clearMessage, if the server handles them.
+// An older server would answer with an error, so it is not told; its record
+// of the screen is then not replaced.
+func sendClear(w *MessengerWriter, server *peerVersion, screen []byte) {
+	if !server.Supports(versionClear) {
+		log.Infof("server does not handle clearMessage; clear not sent")
+		return
+	}
+	w.Send(clearMessage, screen)
+}
+
+// clientCommand handles command recevied from the server.  Server is what
+// the client knows of the server's protocol version.
+func clientCommand(w *MessengerWriter, kind messageKind, data []byte, ready chan struct{}, s *Session, server *peerVersion) {
 	log.Infof("Received command %v", kind)
 	switch kind {
+	case versionMessage:
+		v := parseVersion(data)
+		log.Infof("server protocol version %d", v)
+		// Reply only once, and only now: a server that never
+		// sends its version would not understand ours.
+		if server.set(v) {
+			w.Send(versionMessage, versionPayload())
+		}
 	case pingMessage:
 		w.Send(ackMessage, data)
 	case psMessage:
@@ -468,6 +499,9 @@ func clientCommand(w *MessengerWriter, kind messageKind, data []byte, ready chan
 			readline()
 		}
 	case startMessage:
+		// The server sends its version before startMessage, so
+		// if it has not sent one it never will.
+		server.setDefault()
 		select {
 		case <-ready:
 		default:

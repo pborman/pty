@@ -85,6 +85,24 @@ func (m *MessengerWriter) Send(kind messageKind, buf []byte) (int, error) {
 		return m.Write(buf)
 	}
 	defer m.mu.Lock("Send")()
+	return m.send(kind, buf)
+}
+
+// SendFirst sends a message of kind, which must not be 0, ahead of anything
+// else written to m.  It does not wait for the message to be written: m is
+// locked before SendFirst returns, and the message is written, and m
+// unlocked, in the background, so a peer that is slow to read does not hold
+// up the caller.  It must be called before anything else uses m.
+func (m *MessengerWriter) SendFirst(kind messageKind, buf []byte) {
+	unlock := m.mu.Lock("SendFirst")
+	go func() {
+		defer unlock()
+		m.send(kind, buf)
+	}()
+}
+
+// send is Send for a message, with m.mu held.
+func (m *MessengerWriter) send(kind messageKind, buf []byte) (int, error) {
 
 	// We copy up to 1k into the buffer than includes our header.
 	// If buf is longer than that, we do a second write.  This is

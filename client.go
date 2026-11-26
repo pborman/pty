@@ -73,6 +73,10 @@ type Client struct {
 	// shell is the shell the client was attached to, which resends the
 	// screen to a client that fell behind.  It is set by Shell.Attach.
 	shell *Shell
+
+	// peer is the client's protocol version (see version.go), 0 until
+	// the client sends one.  It has its own lock.
+	peer peerVersion
 }
 
 // NewClient returns a freshly initialized client that writes output to out.
@@ -239,6 +243,13 @@ func (c *Client) resyncShell() *Shell {
 		return nil
 	}
 	return c.shell
+}
+
+// PeerVersion returns the protocol version the client reported, or 0 if it
+// has not reported one.  Use c.peer.Supports to ask about a feature.
+func (c *Client) PeerVersion() int {
+	v, _ := c.peer.Version()
+	return v
 }
 
 func (c *Client) Name() string {

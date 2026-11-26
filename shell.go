@@ -68,27 +68,32 @@ func SelectLoginShell(shells []string) {
 
 type messageKind int
 
+// The values of the message kinds are part of the wire protocol: a server
+// runs for weeks, so it talks to clients built long before and long after
+// it.  A value must never be changed or reused.  New kinds are added at the
+// end, with the next value, and protocolVersion is bumped.
 const (
-	dataMessage = messageKind(iota)
-	ttysizeMessage
-	ttynameMessage
-	serverMessage
-	startMessage
-	waitMessage
-	listMessage
-	countMessage
-	askCountMessage
-	exclusiveMessage
-	saveMessage
-	escapeMessage
-	preemptMessage // sent when another client takes control
-	primaryMessage // sent when we become primary
-	forwardMessage // NAME\0socket
-	psMessage
-	pingMessage
-	ackMessage
-	dumpMessage  // Cause the server to dump
-	clearMessage // The terminal was cleared; see clear.go
+	dataMessage      = messageKind(0)
+	ttysizeMessage   = messageKind(1)
+	ttynameMessage   = messageKind(2)
+	serverMessage    = messageKind(3)
+	startMessage     = messageKind(4)
+	waitMessage      = messageKind(5)
+	listMessage      = messageKind(6)
+	countMessage     = messageKind(7)
+	askCountMessage  = messageKind(8)
+	exclusiveMessage = messageKind(9)
+	saveMessage      = messageKind(10)
+	escapeMessage    = messageKind(11)
+	preemptMessage   = messageKind(12) // sent when another client takes control
+	primaryMessage   = messageKind(13) // sent when we become primary
+	forwardMessage   = messageKind(14) // NAME\0socket
+	psMessage        = messageKind(15)
+	pingMessage      = messageKind(16)
+	ackMessage       = messageKind(17)
+	dumpMessage      = messageKind(18) // Cause the server to dump
+	clearMessage     = messageKind(19) // The terminal was cleared; see clear.go
+	versionMessage   = messageKind(20) // protocol version; see version.go
 )
 
 var messageNames = map[messageKind]string{
@@ -112,6 +117,7 @@ var messageNames = map[messageKind]string{
 	ackMessage:       "ackMessage",
 	dumpMessage:      "dumpMessage",
 	clearMessage:     "clearMessage",
+	versionMessage:   "versionMessage",
 }
 
 func (m messageKind) String() string {

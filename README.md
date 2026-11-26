@@ -288,6 +288,15 @@ back to TCP on 127.0.0.1.  The connection is then encrypted with a secret kept
 in the session's directory, so only someone who can read that directory can
 connect.
 
+A session's server runs for as long as its shell does, so the client you run
+is often newer than the server it talks to.  On connecting, the server tells
+the client its protocol version and the client answers with its own, and
+neither sends the other anything it is too old to understand.  A server
+started before versions were added is treated as version 0: for example, the
+client does not tell it about a clear sequence, so it goes on recording the
+old screen.  A client older than the server prints one `Got message type 20`
+line when it connects; it is harmless.
+
 ## When something goes wrong
 
 * `-v` turns on verbose logging.
