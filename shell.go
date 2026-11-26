@@ -35,18 +35,26 @@ import (
 
 var LoginShell string
 
-func init() {
-	for _, shell := range []string{
-		"/usr/bin/ksh",
-		"/bin/ksh",
-		"/bin/sh",
-	} {
+var baseShells = []string{
+	os.Getenv("SHELL"),
+	"/usr/bin/ksh",
+	"/bin/ksh",
+	"/bin/sh",
+	"/usr/bin/bash",
+	"/bin/bash",
+	"/bin/zsh",
+}
+
+func SelectLoginShell(shells []string) {
+	for _, shell := range append(shells, baseShells...) {
+		if shell == "" {
+			continue
+		}
 		if _, err := os.Stat(shell); err == nil {
 			LoginShell = shell
 			return
 		}
 	}
-	exitf("no available shells")
 }
 
 type messageKind int

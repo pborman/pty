@@ -72,7 +72,6 @@ func countBools(vs ...bool) int {
 }
 
 func main() {
-	os.Setenv("GORACE", "log_path=/tmp/cloud_race")
 	log.Init("pty")
 	dir := filepath.Join(user.HomeDir, rcdir)
 	os.Mkdir(dir, 0700)
@@ -87,6 +86,10 @@ func main() {
 	}
 	if err := ReadConfig(); err != nil {
 		exitf("reading configuration file: %v", err)
+	}
+	SelectLoginShell(config.Shells)
+	if LoginShell == "" {
+		exitf("no available shells")
 	}
 
 	args := options.RegisterAndParse(&opts)

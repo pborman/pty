@@ -25,6 +25,7 @@ import (
 var config = struct {
 	Forward   []string
 	Sequences []SequenceConfig // see sequences.go
+	Shells    []string
 }{}
 
 func ReadConfig() error {
