@@ -33,7 +33,8 @@ import (
 //     iconify the window to suit long-gone output.
 //   - OSC 52, which sets a clipboard (replaying it sets the clipboard to a
 //     stale value) or queries it.
-//   - The ropen query and pty's own ESC [ z.
+//   - Pty's own ESC [ z, and the sequences in seqRules (the ropen query,
+//     and any named in config.yaml).
 //
 // The record filters below drop these from the record.  Anything they do
 // not recognize is recorded as it arrived.  A sequence that sets something
@@ -50,11 +51,6 @@ const (
 	dcsIntro = "\033P"
 	decid    = "\033Z" // Identify Terminal: answered as Primary DA
 	enq      = "\005"  // Enquiry: answered with the answerback string
-
-	// ropenQuery is how ropen asks an iPadSSH terminal for its current
-	// receiver address.  The terminal answers by typing
-	// "#ROPEN HOST:PORT/TOKEN NEPOR#" into the input.
-	ropenQuery = "\033]7717;ropen\007"
 
 	// The most of an OSC or DCS held while waiting for it to end.  A
 	// longer one (an image, say) is recorded as it arrives, or, if it is
@@ -102,6 +98,19 @@ func addRecordFilters(e *EscapeBuffer) {
 		return false
 	})
 	e.AddSequence(enq, func(*EscapeBuffer) bool { return false })
+	for _, r := range seqRules {
+		if r.kind == 0 {
+			r := r
+			e.AddFilterSequence(string(r.start), r.end, "", r.limit, func(e *EscapeBuffer, raw []byte, complete bool) ([]byte, bool) {
+				if !complete || r.tooLong(raw) {
+					// Too long: it is not r after all.
+					return raw, true
+				}
+				e.expect(r.key)
+				return nil, false
+			})
+		}
+	}
 }
 
 // A csiSeq is a parsed control sequence: ESC [ private params inter final.
@@ -309,6 +318,10 @@ func recordCSI(e *EscapeBuffer, raw []byte, complete bool) ([]byte, bool) {
 		}
 		return nil, false
 	}
+	if r := matchRule('[', raw); r != nil {
+		e.expect(r.key)
+		return nil, false
+	}
 	if c, ok := parseCSI(raw); ok {
 		if drop, answer := c.classify(); drop {
 			e.expect(answer)
@@ -345,9 +358,15 @@ func recordOSC(e *EscapeBuffer, raw []byte, complete bool) ([]byte, bool) {
 		body, term = body[:len(body)-tl], body[len(body)-tl:]
 	}
 	ps, rest, _ := strings.Cut(string(body), ";")
+	r := matchRule(']', raw)
 	if !complete {
-		// Too long to be a query; only an OSC 52 is dropped.
-		return raw, ps != "52"
+		// Too long to be a query; only an OSC 52 or one in
+		// seqRules is dropped.
+		return raw, ps != "52" && r == nil
+	}
+	if r != nil {
+		e.expect(r.key)
+		return nil, false
 	}
 	switch ps {
 	case "52": // clipboard
@@ -355,11 +374,6 @@ func recordOSC(e *EscapeBuffer, raw []byte, complete bool) ([]byte, bool) {
 			e.expect("OSC 52")
 		}
 		return nil, false
-	case "7717": // ropen
-		if rest == "ropen" {
-			e.expect(ropenAnswer)
-			return nil, false
-		}
 	case "4", "5": // colour number (c;spec pairs)
 		out := oscColorPairs(raw, ps, rest, term)
 		if len(out) != len(raw) {
@@ -441,6 +455,12 @@ func oscDynamicColors(raw []byte, ps, rest string, term []byte) []byte {
 // recordDCS is the FilterFunc for device control strings.  It drops
 // DECRQSS (DCS $ q) and XTGETTCAP (DCS + q).
 func recordDCS(e *EscapeBuffer, raw []byte, complete bool) ([]byte, bool) {
+	if r := matchRule('P', raw); r != nil {
+		if complete {
+			e.expect(r.key)
+		}
+		return nil, false
+	}
 	b := raw[len(dcsIntro):]
 	i := 0
 	for i < len(b) && b[i] >= 0x30 && b[i] <= 0x3f {

@@ -19,6 +19,9 @@ import (
 	"testing"
 )
 
+// ropenQuery is how ropen asks an iPadSSH terminal for its address.
+const ropenQuery = "\033]7717;ropen\007"
+
 // recordOf returns what the record filters record of in, written all at
 // once if whole is true and otherwise a byte at a time.
 func recordOf(in string, whole bool) (normal, alt string) {

@@ -16,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"strings"
 	"time"
 
 	"github.com/pborman/pty/log"
@@ -39,14 +40,6 @@ import (
 
 // answerWindow is how long after a query its answers are watched for.
 const answerWindow = 5 * time.Second
-
-// ropenAnswer is the key of the answer to ropenQuery, which the terminal
-// types as "#ROPEN HOST:PORT/TOKEN NEPOR#".
-const (
-	ropenAnswer      = "ropen"
-	ropenAnswerStart = "#ROPEN "
-	ropenAnswerEnd   = " NEPOR#"
-)
 
 // answerLimit is the longest answer recognized.  A longer one is passed on
 // as if it were typed.
@@ -132,8 +125,9 @@ func (f *answerFilter) Filter(in []byte, decide func(key string) (expected, keep
 			typed = true
 		}
 	}
+	first := answerFirstBytes()
 	for i := 0; i < len(data); {
-		x := bytes.IndexAny(data[i:], "\033#")
+		x := bytes.IndexAny(data[i:], first)
 		if x < 0 {
 			pass(data[i:])
 			break
@@ -141,19 +135,25 @@ func (f *answerFilter) Filter(in []byte, decide func(key string) (expected, keep
 		pass(data[i : i+x])
 		i += x
 		rest := data[i:]
-		if rest[0] == '#' {
-			if expected, _ := decide(ropenAnswer); !expected {
-				pass(rest[:1])
-				i++
-				continue
+		n, key, complete, ok := scanOwnAnswer(rest, decide)
+		switch {
+		case ok:
+		case rest[0] == '\033':
+			n, key, complete = scanAnswer(rest)
+			if complete {
+				if r := matchAnswer(rest[:n]); r != nil {
+					key = r.key
+				}
 			}
+		default:
+			pass(rest[:1])
+			i++
+			continue
 		}
-		n, key, complete := scanAnswer(rest)
 		if !complete {
-			if n == 1 && rest[0] == '\033' || len(rest) > answerLimit {
+			if n == 1 && rest[0] == '\033' {
 				// A lone ESC is the escape key; pass it
-				// on now.  Anything this long is not an
-				// answer.
+				// on now.
 				pass(rest)
 			} else {
 				f.held = append([]byte{}, rest...)
@@ -176,10 +176,75 @@ func (f *answerFilter) Filter(in []byte, decide func(key string) (expected, keep
 	return out, typed
 }
 
-// scanAnswer looks at the start of b, which starts with ESC or #, for
-// something that may be an answer.  It returns its length, its key (""
-// if it cannot be an answer), and whether all of it is in b.  If it is not
-// complete, n is len(b).
+// answerFirstBytes returns ESC and the first bytes of the answers in
+// seqRules that are not escape sequences.
+func answerFirstBytes() string {
+	first := "\033"
+	for _, r := range seqRules {
+		if a := r.answer; a != nil && a.kind == 0 && strings.IndexByte(first, a.start[0]) < 0 {
+			first += string(a.start[:1])
+		}
+	}
+	return first
+}
+
+// scanOwnAnswer is scanAnswer for the answers in seqRules that are not
+// escape sequences.  It only looks for answers that decide says are
+// expected.  Ok is false if b does not start with one.  If one is too long,
+// it is complete but has no key.
+func scanOwnAnswer(b []byte, decide func(string) (bool, bool)) (n int, key string, complete, ok bool) {
+	for _, r := range seqRules {
+		a := r.answer
+		if a == nil || a.kind != 0 || a.start[0] != b[0] {
+			continue
+		}
+		if len(b) < len(a.start) {
+			if bytes.HasPrefix(a.start, b) {
+				if expected, _ := decide(r.key); expected {
+					return len(b), "", false, true
+				}
+			}
+			continue
+		}
+		if !bytes.HasPrefix(b, a.start) {
+			continue
+		}
+		if expected, _ := decide(r.key); !expected {
+			continue
+		}
+		if a.ends == nil {
+			return len(a.start), r.key, true, true
+		}
+		if x, tl := a.ends.find(b, len(a.start)); x >= 0 {
+			if a.tooLong(b[:x+tl]) {
+				return x + tl, "", true, true
+			}
+			return x + tl, r.key, true, true
+		}
+		if len(b) > a.limit {
+			return len(b), "", true, true
+		}
+		return len(b), "", false, true
+	}
+	return 0, "", false, false
+}
+
+// matchAnswer returns the rule in seqRules with an escape sequence answer
+// that raw, a complete escape sequence, begins with, or nil.
+func matchAnswer(raw []byte) *seqRule {
+	for _, r := range seqRules {
+		if a := r.answer; a != nil && a.kind == raw[1] && bytes.HasPrefix(raw, a.start) {
+			return r
+		}
+	}
+	return nil
+}
+
+// scanAnswer looks at the start of b, which starts with ESC, for an escape
+// sequence that may be an answer.  It returns its length, its key ("" if it
+// cannot be an answer), and whether all of it is in b.  If it is not
+// complete, n is len(b).  If it does not end within answerLimit bytes, the
+// first answerLimit bytes are returned as complete, with no key.
 //
 // The key of an answer is its kind and the bytes that identify it:
 //
@@ -189,23 +254,15 @@ func (f *answerFilter) Filter(in []byte, decide func(key string) (expected, keep
 //	        ESC P 1 + r 5 4 4 e ESC \
 //	"OSC " + Ps, as in "OSC 11" for ESC ] 1 1 ; r g b : ... BEL,
 //	        or "OSC l" for the window title, ESC ] l ... ESC \
-//	ropenAnswer for #ROPEN ... NEPOR#
+//
+// The answers in seqRules have the keys from configAnswerKey instead.
 func scanAnswer(b []byte) (n int, key string, complete bool) {
-	if b[0] == '#' {
-		if len(b) < len(ropenAnswerStart) {
-			if bytes.HasPrefix([]byte(ropenAnswerStart), b) {
-				return len(b), "", false
-			}
-			return 1, "", true
+	if len(b) > answerLimit {
+		// Not an answer; just look as far as answerLimit.
+		if n, key, complete := scanAnswer(b[:answerLimit]); complete {
+			return n, key, true
 		}
-		if !bytes.HasPrefix(b, []byte(ropenAnswerStart)) {
-			return 1, "", true
-		}
-		x := bytes.Index(b, []byte(ropenAnswerEnd))
-		if x < 0 {
-			return len(b), "", false
-		}
-		return x + len(ropenAnswerEnd), ropenAnswer, true
+		return answerLimit, "", true
 	}
 	if len(b) < 2 {
 		return len(b), "", false

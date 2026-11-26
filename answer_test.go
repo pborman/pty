@@ -95,12 +95,17 @@ func TestQueryAnswerKeys(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newAnswerShell(t)
 			s.eb.Write([]byte(tt.query))
-			n, key, complete := scanAnswer([]byte(tt.answer))
-			if n != len(tt.answer) || !complete {
-				t.Fatalf("scanAnswer(%q) = %d, %q, %v", tt.answer, n, key, complete)
+			if len(s.waits) == 0 {
+				t.Fatal("no answer expected")
 			}
-			if s.waits[key] == nil {
-				t.Errorf("answer key %q, expected %q", key, waitKeys(s))
+			var f answerFilter
+			var keys []string
+			out, typed := f.Filter([]byte(tt.answer), func(key string) (bool, bool) {
+				keys = append(keys, key)
+				return s.waits[key] != nil, false
+			})
+			if len(out) != 0 || typed {
+				t.Errorf("answer not recognized: got %q %v; looked up %q, expected %q", out, typed, keys, waitKeys(s))
 			}
 		})
 	}
@@ -155,13 +160,8 @@ func TestScanAnswer(t *testing.T) {
 		{"\033P1$r0m\007\033\\", 10, "DCS $r", true},
 		{"\033P1$\033\\", 6, "", true},
 		{"\033P\033\\", 4, "", true},
-		{"#", 1, "", false},
-		{"#RO", 3, "", false},
-		{"#x", 1, "", true},
-		{"#ROPEX", 1, "", true},
-		{"#ROPENX x", 1, "", true},
-		{"#ROPEN 1.2.3.4:5/t", 18, "", false},
-		{"#ROPEN 1.2.3.4:5/t NEPOR#x", 25, ropenAnswer, true},
+		{"\033[" + strings.Repeat("1", answerLimit), answerLimit, "", true},
+		{"\033[" + strings.Repeat("1", answerLimit-3) + "Ax", answerLimit, "CSI A", true},
 	} {
 		n, key, complete := scanAnswer([]byte(tt.in))
 		if n != tt.n || key != tt.key || complete != tt.complete {
@@ -185,7 +185,7 @@ func filterAnswers(f *answerFilter, expect, keep map[string]bool, reads ...strin
 
 func TestAnswerFilter(t *testing.T) {
 	cpr := map[string]bool{"CSI R": true}
-	ropen := map[string]bool{ropenAnswer: true}
+	ropen := map[string]bool{configAnswerKey([]byte("#ROPEN ")): true}
 	none := map[string]bool{}
 	for _, tt := range []struct {
 		name         string
@@ -205,6 +205,9 @@ func TestAnswerFilter(t *testing.T) {
 		{"ropen dropped", ropen, none, []string{"#ROPEN 1.2.3.4:5/t NEPOR#"}, []string{`"" false`}},
 		{"ropen split", ropen, none, []string{"#ROP", "EN 1:2/t NEP", "OR#!"}, []string{`"" false`, `"" false`, `"!" true`}},
 		{"hash typed", ropen, none, []string{"#x#"}, []string{`"#x" true`}},
+		{"ropen too long", ropen, none, []string{"#ROPEN " + strings.Repeat("x", defaultSequenceLimit)}, []string{fmt.Sprintf("%q true", "#ROPEN "+strings.Repeat("x", defaultSequenceLimit))}},
+		{"ropen too long, complete", ropen, none, []string{"#ROPEN " + strings.Repeat("x", defaultSequenceLimit) + "! NEPOR#"}, []string{fmt.Sprintf("%q true", "#ROPEN "+strings.Repeat("x", defaultSequenceLimit)+"! NEPOR#")}},
+		{"ropen then typing", ropen, none, []string{"#ROPEN 1:2/t NEPOR##ROPEN 3:4/u NEPOR#ls"}, []string{`"ls" true`}},
 		{"hash not expected", none, none, []string{"#ROPEN 1:2/t NEPOR#"}, []string{`"#ROPEN 1:2/t NEPOR#" true`}},
 		{"too long", cpr, none, []string{"\033[" + strings.Repeat("1", answerLimit)}, []string{fmt.Sprintf("%q true", "\033["+strings.Repeat("1", answerLimit))}},
 	} {

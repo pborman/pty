@@ -23,7 +23,8 @@ import (
 )
 
 var config = struct {
-	Forward []string
+	Forward   []string
+	Sequences []SequenceConfig // see sequences.go
 }{}
 
 func ReadConfig() error {
@@ -34,5 +35,13 @@ func ReadConfig() error {
 		}
 		return err
 	}
-	return yaml.Unmarshal(data, &config)
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return err
+	}
+	rules, err := compileSequences(append(append([]SequenceConfig{}, builtinSequences...), config.Sequences...))
+	if err != nil {
+		return err
+	}
+	seqRules = rules
+	return nil
 }
