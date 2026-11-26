@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestMain selects the login shell as main does, since tests such as
@@ -361,4 +362,97 @@ func TestExecsh(t *testing.T) {
 	if got, want := strings.TrimSpace(string(out)), script+" "+script; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
+}
+
+// exitShell returns a shell in the alternate screen with three clients
+// attached, writing to the returned buffers.
+func exitShell(t *testing.T) (*Shell, []*closeBuffer) {
+	t.Helper()
+	sess := MakeSession("exit", "")
+	t.Cleanup(sess.Remove)
+	s := NewShell(sess)
+	s.eb.Write([]byte("history" + scasb + "vi"))
+	var bufs []*closeBuffer
+	for i := 0; i < 3; i++ {
+		b := &closeBuffer{}
+		bufs = append(bufs, b)
+		s.Attach(NewClient(b))
+	}
+	return s, bufs
+}
+
+// waitClosed waits for each of bufs to be closed and returns what was
+// written to each.
+func waitClosed(t *testing.T, bufs []*closeBuffer) []string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var out []string
+	for _, b := range bufs {
+		for !b.isClosed() {
+			if time.Now().After(deadline) {
+				t.Fatal("client not closed")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		b.mu.Lock()
+		out = append(out, string(b.buf))
+		b.mu.Unlock()
+	}
+	return out
+}
+
+// Exit closes every client, having sent each the sequence that leaves the
+// alternate screen.
+func TestShellExitLeavesAltScreen(t *testing.T) {
+	defer withTempHome(t)()
+	s, bufs := exitShell(t)
+	if !s.closeClients() {
+		t.Fatal("closeClients returned false")
+	}
+	if s.closeClients() {
+		t.Error("second closeClients returned true")
+	}
+	want := cls + "history" + scasb + "vi" + nsbrc
+	for i, got := range waitClosed(t, bufs) {
+		if got != want {
+			t.Errorf("client %d got %q, want %q", i, got, want)
+		}
+	}
+}
+
+// Exit reads whether the alternate screen is active with s.mu held: run
+// with -race, this fails if it does not.  The goroutine standing in for
+// runout changes it, with s.mu held, after closeClients has read it, and
+// nothing but s.mu orders the two.  (The goroutine waits by sleeping, which
+// orders nothing.)
+func TestShellExitLocked(t *testing.T) {
+	defer withTempHome(t)()
+	s, bufs := exitShell(t)
+
+	stop := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		time.Sleep(5 * time.Millisecond)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			unlock := s.mu.Lock("test runout")
+			s.eb.inalt = !s.eb.inalt
+			unlock()
+			time.Sleep(100 * time.Microsecond)
+		}
+	}()
+	exited := make(chan bool)
+	go func() { exited <- s.closeClients() }()
+	if !<-exited {
+		t.Fatal("closeClients returned false")
+	}
+	time.Sleep(20 * time.Millisecond)
+	close(stop)
+	<-stopped
+	waitClosed(t, bufs)
 }

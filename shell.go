@@ -504,27 +504,42 @@ func (s *Shell) Start(debug bool) error {
 	return nil
 }
 
+// Exit is called when the shell's program has exited.  It sends each client
+// what takes its terminal off the alternate screen, closes the clients and
+// exits the server.
 func (s *Shell) Exit() {
+	if s.closeClients() {
+		s.session.Exit(0)
+	}
+}
+
+// closeClients is Exit up to exiting the server.  It returns false if Exit
+// was already called.
+//
+// The alternate screen state is read, and the sequence leaving it queued,
+// with s.mu held, as runout records output with it held.  Queuing never
+// blocks, and c.mu is taken after s.mu, so this is safe with s.mu held.  The
+// clients are closed after s.mu is released: checkClose closes them in the
+// background, but Close waits for a client's output to be written.
+func (s *Shell) closeClients() bool {
 	unlock := s.mu.Lock("Exit")
 	if s.exiting {
 		unlock()
-		return
+		return false
 	}
 	s.exiting = true
 	var clients []*Client
 	for c := range s.clients {
 		clients = append(clients, c)
+		if s.eb.inalt {
+			c.OutputFinal([]byte(nsbrc))
+		}
 	}
-
 	unlock()
 	for _, c := range clients {
-		// Perhaps this should be locked.
-		if s.eb.inalt {
-			c.Output([]byte(nsbrc))
-		}
 		checkClose(c)
 	}
-	s.session.Exit(0)
+	return true
 }
 
 func (s *Shell) List(me *Client) {
