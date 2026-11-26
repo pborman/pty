@@ -125,6 +125,15 @@ const (
 	// query on a reconnect would make the terminal type a stale answer
 	// at whatever is reading input, so it is never recorded.
 	ropenQuery = "\033]7717;ropen\007"
+
+	// osc52 starts an OSC 52 (manipulate selection data) sequence,
+	// which ends with BEL or ESC \.  It either sets a clipboard or,
+	// with a body of "?", asks the terminal to type the clipboard's
+	// contents into the input.  Replaying either on a reconnect would
+	// set the clipboard to a stale value or type the clipboard at
+	// whatever is reading input, so it is passed to the attached
+	// clients but never recorded.
+	osc52 = "\033]52;"
 )
 
 // A ShellClient can be attached to a Shell.
@@ -193,6 +202,9 @@ func NewShell(session *Session) *Shell {
 		return false
 	})
 	s.eb.AddSequence(ropenQuery, func(eb *EscapeBuffer) bool {
+		return false
+	})
+	s.eb.AddReportSequenceTerms(osc52, []string{"\007", "\033\\"}, func(*EscapeBuffer, []byte) bool {
 		return false
 	})
 	s.eb.AddSequence(scasb, func(eb *EscapeBuffer) bool {

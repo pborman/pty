@@ -39,8 +39,8 @@ var tlog = func(format string, v ...interface{}) {}
 
 type seqCall struct {
 	seq      []byte
-	term     []byte // bytes that terminate the sequence
-	seen     []byte // bytes we have seen so far
+	terms    [][]byte // each terminates the sequence; the earliest wins
+	seen     []byte   // bytes we have seen so far
 	callback func(*EscapeBuffer, []byte) bool
 }
 
@@ -79,11 +79,30 @@ func (e *EscapeBuffer) AddSequence(seq string, f func(*EscapeBuffer) bool) {
 	})
 }
 
+// AddReportSequence arranges for f to be called with the bytes between seq
+// and the next term.  The bytes from seq through term are recorded only if f
+// returns true, and then without seq and term.  An empty term makes it the
+// same as AddSequence.
 func (e *EscapeBuffer) AddReportSequence(seq, term string, f func(*EscapeBuffer, []byte) bool) {
+	e.AddReportSequenceTerms(seq, []string{term}, f)
+}
+
+// AddReportSequenceTerms is AddReportSequence for a sequence that may end
+// with any one of terms (for example an OSC, which ends with BEL or ESC \).
+// Empty strings in terms are ignored.
+//
+// A multi-byte terminator is only found if it arrives in a single Write.
+func (e *EscapeBuffer) AddReportSequenceTerms(seq string, terms []string, f func(*EscapeBuffer, []byte) bool) {
 	if len(seq) == 0 {
 		return
 	}
-	if len(term) == 0 {
+	var bterms [][]byte
+	for _, t := range terms {
+		if t != "" {
+			bterms = append(bterms, []byte(t))
+		}
+	}
+	if len(bterms) == 0 {
 		e.AddSequence(seq, func(*EscapeBuffer) bool {
 			return f(e, nil)
 		})
@@ -95,9 +114,21 @@ func (e *EscapeBuffer) AddReportSequence(seq, term string, f func(*EscapeBuffer,
 	}
 	e.sequences = append(e.sequences, seqCall{
 		seq:      []byte(seq),
-		term:     []byte(term),
+		terms:    bterms,
 		callback: f,
 	})
+}
+
+// indexTerm returns the index in buf of the earliest of terms and that
+// term's length, or -1, 0 if none of them is in buf.
+func indexTerm(buf []byte, terms [][]byte) (int, int) {
+	x, n := -1, 0
+	for _, t := range terms {
+		if i := bytes.Index(buf, t); i >= 0 && (x < 0 || i < x) {
+			x, n = i, len(t)
+		}
+	}
+	return x, n
 }
 
 func appendto(old, new []byte) []byte {
@@ -179,14 +210,15 @@ Loop:
 		// for the ending bytes.
 		if e.inseq != nil {
 			// there is a bug here if the terminating
-			// sequence is more than one byte.
-			x := bytes.Index(buf, e.inseq.term)
+			// sequence is more than one byte and is split
+			// across writes.
+			x, tl := indexTerm(buf, e.inseq.terms)
 			if x < 0 {
 				e.inseq.seen = append(e.inseq.seen, buf...)
 				return n, nil
 			}
 			e.inseq.seen = append(e.inseq.seen, buf[:x]...)
-			x += len(e.inseq.term)
+			x += tl
 			if e.inseq.callback(e, e.inseq.seen) {
 				e.add(e.inseq.seen)
 			}
@@ -206,7 +238,7 @@ Loop:
 		for _, s := range e.sequences {
 			if len(buf) >= len(s.seq) {
 				if bytes.Equal(buf[:len(s.seq)], s.seq) {
-					if len(s.term) > 0 {
+					if len(s.terms) > 0 {
 						seq := s
 						e.inseq = &seq
 					} else if s.callback(e, nil) {

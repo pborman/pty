@@ -16,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -176,5 +177,36 @@ func TestAppendtoOverflow(t *testing.T) {
 	e.Flush()
 	if len(e.normal) > 4 {
 		t.Errorf("overflow kept %d bytes, cap 4", len(e.normal))
+	}
+}
+
+func TestAddReportSequenceTerms(t *testing.T) {
+	e := NewEscapeBuffer(64)
+	var seen []string
+	e.AddReportSequenceTerms("\033]", []string{"", "\a", "\033\\"}, func(_ *EscapeBuffer, data []byte) bool {
+		seen = append(seen, string(data))
+		return false
+	})
+	e.Write([]byte("a\033]one\033\\b\033]two\ac\033]three\a\033\\d"))
+	e.Flush()
+	if want := []string{"one", "two", "three"}; strings.Join(seen, ",") != strings.Join(want, ",") {
+		t.Errorf("payloads = %q, want %q", seen, want)
+	}
+	if got, want := string(e.normal), "abc\033\\d"; got != want {
+		t.Errorf("buffer = %q, want %q", got, want)
+	}
+}
+
+func TestAddReportSequenceTermsNone(t *testing.T) {
+	e := NewEscapeBuffer(64)
+	called := 0
+	e.AddReportSequenceTerms("XYZ", []string{""}, func(*EscapeBuffer, []byte) bool {
+		called++
+		return false
+	})
+	e.Write([]byte("abXYZcd"))
+	e.Flush()
+	if called != 1 || string(e.normal) != "abcd" {
+		t.Errorf("called %d, buffer %q; want 1, abcd", called, e.normal)
 	}
 }

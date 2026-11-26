@@ -130,3 +130,37 @@ func TestShellDropsRopenQuery(t *testing.T) {
 		t.Errorf("recorded %q, want %q", got, want)
 	}
 }
+
+func TestShellDropsOSC52(t *testing.T) {
+	defer withTempHome(t)()
+	sess := MakeSession("osc52sess", "")
+	defer sess.Remove()
+
+	for _, tt := range []struct {
+		name   string
+		writes []string
+		want   string
+	}{
+		{"BEL", []string{"a\033]52;c;aGk=\007b"}, "ab"},
+		{"ST", []string{"a\033]52;c;aGk=\033\\b"}, "ab"},
+		{"query", []string{"a\033]52;c;?\007b"}, "ab"},
+		{"two in one write", []string{"a\033]52;c;eA==\007b\033]52;p;eQ==\033\\c"}, "abc"},
+		{"earliest terminator wins", []string{"a\033]52;c;eA==\007b\033\\c"}, "ab\033\\c"},
+		{"split intro", []string{"a\033]5", "2;c;aGk=\007b"}, "ab"},
+		{"split body", []string{"a\033]52;c;aG", "k=\007b"}, "ab"},
+		{"split before ST", []string{"a\033]52;c;aGk=", "\033\\b"}, "ab"},
+		{"other OSC kept", []string{"a\033]0;title\007b"}, "a\033]0;title\007b"},
+		{"OSC 520 kept", []string{"a\033]520;x\007b"}, "a\033]520;x\007b"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewShell(sess)
+			for _, w := range tt.writes {
+				s.eb.Write([]byte(w))
+			}
+			s.eb.Flush()
+			if got := string(s.eb.normal); got != tt.want {
+				t.Errorf("recorded %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
