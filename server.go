@@ -179,14 +179,17 @@ func (s *Shell) attach(c net.Conn) {
 					mw.Sendf(serverMessage, "ERROR: SETSIZE: %v\r\n", err)
 				}
 			case saveMessage:
-				var err error
+				// The file may be slow, or a FIFO no one is
+				// reading, so it is not written with s.mu held.
 				unlock := s.mu.Lock("saveMessage")
+				var screen []byte
 				if s.eb.inalt {
-					err = ioutil.WriteFile(string(msg), s.eb.alt, 0600)
+					screen = append(screen, s.eb.alt...)
 				} else {
-					err = ioutil.WriteFile(string(msg), s.eb.normal, 0600)
+					screen = append(screen, s.eb.normal...)
 				}
 				unlock()
+				err := ioutil.WriteFile(string(msg), screen, 0600)
 				if err != nil {
 					mw.Sendf(serverMessage, "ERROR: saving screen: %v\n", err)
 				} else {
@@ -195,9 +198,20 @@ func (s *Shell) attach(c net.Conn) {
 			case clearMessage:
 				s.ClearScreen(client, msg)
 			case escapeMessage:
+				// Only the copy is made with s.mu held: a
+				// client that is not reading would block the
+				// write, and with it the whole session.
 				unlock := s.mu.Lock("escapeMessage")
-				s.eb.sendEscapes(mw, strings.ToLower(string(msg)) == "alt")
+				var screen []byte
+				if strings.ToLower(string(msg)) == "alt" {
+					screen = append(screen, s.eb.alt...)
+				} else {
+					screen = append(screen, s.eb.normal...)
+				}
 				unlock()
+				var list bytes.Buffer
+				writeEscapes(&list, screen)
+				mw.Write(list.Bytes())
 			default:
 				mw.Sendf(serverMessage, "ERROR: UNSUPPORTED KIND %d\r\n", kind)
 			}

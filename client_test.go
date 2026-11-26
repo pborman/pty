@@ -16,11 +16,13 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -199,5 +201,200 @@ func TestCheckCloseClosesSocket(t *testing.T) {
 	peer.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if _, err := peer.Read(make([]byte, 1)); err != io.EOF {
 		t.Errorf("peer read after checkClose = %v, want EOF", err)
+	}
+}
+
+// gateWriter is a writer whose writes block until open is closed, like a
+// socket whose peer has stopped reading.  Started is closed when the first
+// write begins.
+type gateWriter struct {
+	open    chan struct{}
+	started chan struct{}
+	once    sync.Once
+	mu      sync.Mutex
+	buf     bytes.Buffer
+}
+
+func newGateWriter() *gateWriter {
+	return &gateWriter{open: make(chan struct{}), started: make(chan struct{})}
+}
+
+func (g *gateWriter) Write(p []byte) (int, error) {
+	g.once.Do(func() { close(g.started) })
+	<-g.open
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.buf.Write(p)
+}
+
+func (g *gateWriter) bytes() []byte {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]byte{}, g.buf.Bytes()...)
+}
+
+// queuedData returns the number of bytes of terminal output queued for c and
+// the number of control messages queued.
+func queuedData(c *Client) (data, msgs int) {
+	defer c.mu.Lock("test")()
+	for _, b := range c.buffers {
+		if b.kind == dataMessage {
+			data += len(b.data)
+		} else {
+			msgs++
+		}
+	}
+	return data, msgs
+}
+
+// TestClientStalledQueueBounded attaches a client whose socket accepts
+// nothing and has the shell print far more than clientQueueLimit, as with
+// yes(1) running while a terminal is stopped with ^S.  The client's queue
+// must stay bounded, its control messages must all be kept, and once it reads
+// again it must be sent, in order, what it was writing when it stalled, the
+// control messages, the recorded screen, and then output that came after.
+func TestClientStalledQueueBounded(t *testing.T) {
+	defer withTempHome(t)()
+	defer func(n int) { clientQueueLimit = n }(clientQueueLimit)
+	clientQueueLimit = 4096
+
+	sess := MakeSession("stalled", "")
+	defer sess.Remove()
+	s := NewShell(sess)
+
+	// What Shell.runout does with output from the shell.
+	output := func(data string) {
+		defer s.mu.Lock("test")()
+		s.eb.Write([]byte(data))
+		buf := []byte(data)
+		for c := range s.clients {
+			c.Output(buf)
+		}
+	}
+	output("before\r\n")
+
+	g := newGateWriter()
+	c := NewClient(NewMessengerWriter(g))
+	defer closeClient(t, c)
+	s.Attach(c)
+	select {
+	case <-g.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("client never wrote the start message")
+	}
+	// The output goroutine is now blocked writing the start message.
+	// The attach screen is queued behind it, and is thrown away with
+	// the rest of the output.
+
+	var wantMsgs []string
+	for i := 0; i < 2000; i++ {
+		output(fmt.Sprintf("line %d\r\n", i))
+		if i%100 == 0 {
+			m := fmt.Sprintf("msg %d", i)
+			wantMsgs = append(wantMsgs, m)
+			c.Send(serverMessage, []byte(m))
+		}
+		if data, _ := queuedData(c); data > clientQueueLimit {
+			t.Fatalf("after line %d, %d bytes queued, limit %d", i, data, clientQueueLimit)
+		}
+	}
+	// The output was much more than the limit, so the client is
+	// behind, nothing but the control messages is queued, and no screen
+	// is queued while it stays stalled.
+	unlock := c.mu.Lock("test")
+	behind := c.behind
+	unlock()
+	if !behind {
+		t.Fatal("stalled client is not marked behind")
+	}
+	if data, msgs := queuedData(c); data != 0 || msgs != len(wantMsgs) {
+		t.Errorf("stalled client has %d data bytes and %d messages queued, want 0 and %d", data, msgs, len(wantMsgs))
+	}
+
+	unlock = s.mu.Lock("test")
+	wantScreen := s.screen()
+	unlock()
+
+	// Let the client read again and wait for it to be resynced.
+	close(g.open)
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		unlock := c.mu.Lock("test")
+		behind := c.behind
+		unlock()
+		if !behind {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("client was never resynced")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	output("after\r\n")
+	closeClient(t, c)
+
+	// Split what the client was sent into data and messages.
+	// A NUL in data marks where each message came.
+	gotMsgs := []string{}
+	var data []byte
+	r := NewMessengerReader(bytes.NewReader(g.bytes()), func(kind messageKind, msg []byte) {
+		gotMsgs = append(gotMsgs, kind.String()+" "+string(msg))
+		data = append(data, 0)
+	})
+	var rbuf [1024]byte
+	for {
+		n, err := r.Read(rbuf[:])
+		data = append(data, rbuf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+	want := []byte{0} // the start message
+	for range wantMsgs {
+		want = append(want, 0)
+	}
+	want = append(want, wantScreen...)
+	want = append(want, "after\r\n"...)
+	if !bytes.Equal(data, want) {
+		t.Errorf("client was sent:\n%q\nwant:\n%q", data, want)
+	}
+	for i := range wantMsgs {
+		wantMsgs[i] = "serverMessage " + wantMsgs[i]
+	}
+	wantMsgs = append([]string{"startMessage "}, wantMsgs...)
+	if fmt.Sprint(gotMsgs) != fmt.Sprint(wantMsgs) {
+		t.Errorf("messages:\n%q\nwant\n%q", gotMsgs, wantMsgs)
+	}
+}
+
+// TestClientKeepingUp checks that a client that reads everything gets all of
+// the output, unchanged, even when it adds up to far more than
+// clientQueueLimit.
+func TestClientKeepingUp(t *testing.T) {
+	defer func(n int) { clientQueueLimit = n }(clientQueueLimit)
+	clientQueueLimit = 4096
+
+	var buf closeBuffer
+	c := NewClient(&buf)
+	var want []byte
+	for i := 0; i < 5000; i++ {
+		line := []byte(fmt.Sprintf("line %d\r\n", i))
+		want = append(want, line...)
+		c.Output(line)
+		// Give the output goroutine time to keep up.
+		for deadline := time.Now().Add(5 * time.Second); ; {
+			if data, _ := queuedData(c); data < clientQueueLimit/2 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("client output goroutine is stuck")
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	closeClient(t, c)
+	buf.mu.Lock()
+	defer buf.mu.Unlock()
+	if !bytes.Equal(buf.buf, want) {
+		t.Errorf("client got %d bytes, want %d", len(buf.buf), len(want))
 	}
 }

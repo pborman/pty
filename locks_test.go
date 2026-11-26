@@ -17,8 +17,12 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"net"
+	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -214,4 +218,114 @@ func (l lockedWriter) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.w.Write(p)
+}
+
+// lockFree reports whether s.mu can be taken within a second.
+func lockFree(s *Shell) bool {
+	got := make(chan struct{})
+	go func() {
+		s.mu.Lock("test")()
+		close(got)
+	}()
+	select {
+	case <-got:
+		return true
+	case <-time.After(time.Second):
+		return false
+	}
+}
+
+// stalledConn starts s serving a connection whose client end, returned,
+// reads nothing until the test reads it.  A net.Pipe has no buffer, so
+// every write the server makes to it blocks until the test reads.
+func stalledConn(t *testing.T, s *Shell) net.Conn {
+	t.Helper()
+	server, client := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		s.attach(server)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		client.Close()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("attach did not return")
+		}
+	})
+	return client
+}
+
+// TestEscapeMessageStalledClient asks for the escape sequence list from a
+// client that is not reading.  The list used to be written to the client's
+// socket with the shell's lock held, so the write blocked and froze the
+// session for every client.
+func TestEscapeMessageStalledClient(t *testing.T) {
+	defer withTempHome(t)()
+	sess := MakeSession("escstall", "")
+	defer sess.Remove()
+	s := NewShell(sess)
+	unlock := s.mu.Lock("test")
+	s.eb.Write([]byte("\033[1mbold\033[0m \033[31mred\033[m\r\n"))
+	var want bytes.Buffer
+	s.eb.sendEscapes(&want, false)
+	unlock()
+
+	conn := stalledConn(t, s)
+	if _, err := NewMessengerWriter(conn).Send(escapeMessage, []byte("normal")); err != nil {
+		t.Fatal(err)
+	}
+	// Give the server time to reach its write to the stalled client.
+	time.Sleep(100 * time.Millisecond)
+	if !lockFree(s) {
+		t.Fatal("the shell lock is held while writing to a stalled client")
+	}
+
+	// The client is sent the same list as before, as plain output.
+	got := make([]byte, want.Len())
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.ReadFull(conn, got); err != nil {
+		t.Fatalf("reading the escape list: %v", err)
+	}
+	if !bytes.Equal(got, want.Bytes()) {
+		t.Errorf("escape list = %q, want %q", got, want.Bytes())
+	}
+}
+
+// TestSaveMessageSlowFile saves the screen to a FIFO that no one is reading.
+// The file used to be written with the shell's lock held, so opening it
+// blocked the whole session.
+func TestSaveMessageSlowFile(t *testing.T) {
+	defer withTempHome(t)()
+	sess := MakeSession("savestall", "")
+	defer sess.Remove()
+	s := NewShell(sess)
+	unlock := s.mu.Lock("test")
+	s.eb.Write([]byte("saved text\r\n"))
+	want := append([]byte{}, s.eb.normal...)
+	unlock()
+
+	fifo := filepath.Join(t.TempDir(), "fifo")
+	if err := syscall.Mkfifo(fifo, 0600); err != nil {
+		t.Fatal(err)
+	}
+	conn := stalledConn(t, s)
+	if _, err := NewMessengerWriter(conn).Send(saveMessage, []byte(fifo)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if !lockFree(s) {
+		t.Fatal("the shell lock is held while writing the save file")
+	}
+
+	// Read the FIFO, and the server's reply, so the server can finish.
+	go NewMessengerReader(conn, func(messageKind, []byte) {}).Read(make([]byte, 1024))
+	got, err := ioutil.ReadFile(fifo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("saved %q, want %q", got, want)
+	}
 }

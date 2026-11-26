@@ -461,12 +461,15 @@ Loop:
 }
 
 func (e *EscapeBuffer) sendEscapes(w io.Writer, alt bool) {
-	var buf []byte
 	if alt {
-		buf = e.alt
+		writeEscapes(w, e.alt)
 	} else {
-		buf = e.normal
+		writeEscapes(w, e.normal)
 	}
+}
+
+// writeEscapes writes to w the list of the distinct escape sequences in buf.
+func writeEscapes(w io.Writer, buf []byte) {
 	seen := map[string]bool{}
 	// UTF8 keeps multibyte runes as text (bytes 0x80-0x9f are not treated
 	// as C1 controls); only real escape sequences (non-empty Type) count.

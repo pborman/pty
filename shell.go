@@ -240,19 +240,13 @@ func (s *Shell) Setenv(key, value string) {
 func (s *Shell) Attach(c *Client) int {
 	log.Infof("attach new client")
 	defer s.mu.Lock("Attach")()
+	unlock := c.mu.Lock("Attach")
+	c.shell = s
+	unlock()
 	c.Send(startMessage, nil)
-	buf := append([]byte(cls), s.eb.normal...)
-	if !c.Output(buf) {
+	if !c.Output(s.screen()) {
 		log.Infof("new client write failure")
 		return len(s.clients)
-	}
-	if s.eb.inalt {
-		c.Output([]byte(scasb))
-		buf := append([]byte{}, s.eb.alt...)
-		if !c.Output(buf) {
-			log.Infof("new client write failure")
-			return len(s.clients)
-		}
 	}
 	// Don't take ownership here, wait
 	// until the first input from the client
@@ -260,6 +254,47 @@ func (s *Shell) Attach(c *Client) int {
 	s.wg.Add(1)
 	s.clients[c] = struct{}{}
 	return len(s.clients) - 1
+}
+
+// screen returns what brings a terminal up to date with the shell: the
+// recorded normal screen and, if the alternate screen is active, the
+// alternate screen.  The returned buffer is a copy.  S.mu must be held.
+func (s *Shell) screen() []byte {
+	n := len(cls) + len(s.eb.normal)
+	if s.eb.inalt {
+		n += len(scasb) + len(s.eb.alt)
+	}
+	buf := make([]byte, 0, n)
+	buf = append(buf, cls...)
+	buf = append(buf, s.eb.normal...)
+	if s.eb.inalt {
+		buf = append(buf, scasb...)
+		buf = append(buf, s.eb.alt...)
+	}
+	return buf
+}
+
+// resync queues the screen for c, a client whose terminal output was thrown
+// away because it stopped reading (see clientQueueLimit), and marks it as
+// caught up.  It is called by c's output goroutine once c's queue is empty.
+//
+// The screen is taken with s.mu held, and runout records output and passes
+// it to the clients with s.mu held, so the screen holds all the output c
+// dropped, and output that is not in it reaches c after it.  Control
+// messages queued since the queue emptied stay ahead of the screen.
+func (s *Shell) resync(c *Client) {
+	defer s.mu.Lock("resync")()
+	defer c.mu.Lock("resync")()
+	if !c.behind {
+		return
+	}
+	c.behind = false
+	if _, ok := s.clients[c]; !ok {
+		return // detached; no more output is coming
+	}
+	log.Infof("resyncing client %s", c.name)
+	c.buffers = append(c.buffers, mBuffer{data: s.screen(), resync: true})
+	c.wake()
 }
 
 func (s *Shell) CountClients() int {

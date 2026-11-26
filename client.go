@@ -30,7 +30,21 @@ import (
 type mBuffer struct {
 	kind messageKind
 	data []byte
+
+	// resync is set on the screen queued by Shell.resync.  Its bytes
+	// are not counted in Client.queued, so a screen larger than
+	// clientQueueLimit cannot put the client behind again before it
+	// has been written.
+	resync bool
 }
+
+// clientQueueLimit is the most terminal output, in bytes, that is queued for
+// a client.  A client whose queue grows past it has stopped reading (its
+// terminal was stopped with ^S, the link under it died, or the client was
+// suspended).  Its queued output is thrown away and the client is marked
+// behind; once its socket accepts writes again it is sent the recorded
+// screen, as when it attached.  Tests change it.
+var clientQueueLimit = 4 << 20
 
 // A Client represents an incoming client for a shell.
 type Client struct {
@@ -44,6 +58,21 @@ type Client struct {
 	out     io.Writer
 	primary bool
 	pid     int
+
+	// queued is the number of bytes of terminal output (dataMessage)
+	// in buffers, not counting a resync screen.
+	queued int
+
+	// behind is set when the client's terminal output was thrown away
+	// because the queue passed clientQueueLimit.  While it is set
+	// further terminal output is dropped; control messages are still
+	// queued.  The output goroutine clears it, by way of shell.resync,
+	// once it has written everything still queued.
+	behind bool
+
+	// shell is the shell the client was attached to, which resends the
+	// screen to a client that fell behind.  It is set by Shell.Attach.
+	shell *Shell
 }
 
 // NewClient returns a freshly initialized client that writes output to out.
@@ -70,26 +99,69 @@ func (c *Client) Send(kind messageKind, buf []byte) bool {
 		return true
 	}
 	unlock := c.mu.Lock("Send")
-	c.buffers = append(c.buffers, mBuffer{kind: kind, data: buf})
+	c.queue(kind, buf)
 	unlock()
-	select {
-	case c.ready <- struct{}{}:
-	default:
-	}
 	return true
 }
 
-// Send implements ShellClient.
+// SendLocked implements ShellClient.  It is Send for a caller already holding
+// c.mu.
 func (c *Client) SendLocked(kind messageKind, buf []byte) bool {
 	if kind == 0 && len(buf) == 0 {
 		return true
 	}
+	c.queue(kind, buf)
+	return true
+}
+
+// queue adds buf to the client's queue and wakes the output goroutine.  It
+// never blocks.  Terminal output is dropped while the client is behind, and
+// if it takes the queue past clientQueueLimit all the queued terminal output
+// is thrown away and the client is marked behind.  Control messages are
+// always queued, and stay in order.  C.mu must be held.
+func (c *Client) queue(kind messageKind, buf []byte) {
+	if kind == dataMessage {
+		if c.behind {
+			return
+		}
+		if c.queued+len(buf) > clientQueueLimit {
+			c.dropOutput()
+			return
+		}
+		c.queued += len(buf)
+	}
 	c.buffers = append(c.buffers, mBuffer{kind: kind, data: buf})
+	c.wake()
+}
+
+// dropOutput throws away the terminal output in the client's queue, keeping
+// the control messages, and marks the client behind.  C.mu must be held.
+func (c *Client) dropOutput() {
+	log.Infof("client %s is not reading; dropping %d bytes of output", c.name, c.queued)
+	kept := c.buffers[:0]
+	for _, b := range c.buffers {
+		if b.kind != dataMessage {
+			kept = append(kept, b)
+		}
+	}
+	// Clear the tail so the dropped buffers can be collected.
+	for i := len(kept); i < len(c.buffers); i++ {
+		c.buffers[i] = mBuffer{}
+	}
+	c.buffers = kept
+	c.queued = 0
+	c.behind = true
+	// The output goroutine resyncs the client once the queue is
+	// empty, so make sure it looks.
+	c.wake()
+}
+
+// wake tells the output goroutine there is something to do.
+func (c *Client) wake() {
 	select {
 	case c.ready <- struct{}{}:
 	default:
 	}
-	return true
 }
 
 // Close implements ShellClient and io.Closer.  It writes whatever output
@@ -146,8 +218,27 @@ func (c *Client) nextBuf() mBuffer {
 		return mBuffer{}
 	}
 	buf := c.buffers[0]
+	c.buffers[0] = mBuffer{}
 	c.buffers = c.buffers[1:]
+	if buf.kind == dataMessage && !buf.resync {
+		c.queued -= len(buf.data)
+	}
 	return buf
+}
+
+// resyncShell returns the shell to resync c from, or nil if c is not behind.
+// A client that is behind but was never attached to a shell has no screen to
+// be sent, so it is just marked as caught up.
+func (c *Client) resyncShell() *Shell {
+	defer c.mu.Lock("resyncShell")()
+	if !c.behind {
+		return nil
+	}
+	if c.shell == nil {
+		c.behind = false
+		return nil
+	}
+	return c.shell
 }
 
 func (c *Client) Name() string {
@@ -185,19 +276,36 @@ func (c *Client) runout() {
 		case <-c.quit:
 			quitting = true
 		}
-		c.flush()
+		c.flush(!quitting)
 		if quitting {
 			return
 		}
 	}
 }
 
-// flush writes all the currently queued buffers to the client.
-func (c *Client) flush() {
+// flush writes all the currently queued buffers to the client.  If the
+// client fell behind and resync is true, once the queue is empty it has the
+// shell queue the screen and writes that too.  Resync is false for the
+// final flush done by Close: a client that is going away does not need the
+// screen.
+//
+// Because the screen is only asked for once the queue has drained, that is,
+// once the socket has accepted everything written before it, a client that
+// stays stalled is not sent the screen again and again: while it is stalled
+// this goroutine is blocked in a write.
+func (c *Client) flush(resync bool) {
 	for {
 		m := c.nextBuf()
 		if m.kind == 0 && m.data == nil {
-			return
+			if !resync {
+				return
+			}
+			s := c.resyncShell()
+			if s == nil {
+				return
+			}
+			s.resync(c)
+			continue
 		}
 		if m.kind == 0 {
 			if _, err := c.out.Write(m.data); err != nil {
