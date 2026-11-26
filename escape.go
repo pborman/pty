@@ -37,14 +37,111 @@ func init() {
 
 var tlog = func(format string, v ...interface{}) {}
 
+// An endSet says how a sequence that does not end with its introducer ends.
+type endSet struct {
+	multi   [][]byte  // terminators of two or more bytes
+	term1   [256]bool // one-byte terminators
+	ends    [256]bool // bytes that end the sequence but are not part of it
+	first   [256]bool // the first bytes of all of the above
+	maxTerm int       // length of the longest terminator
+}
+
+// newEndSet returns the endSet for terms and ends (see
+// AddReportSequenceTerms), or nil if both are empty.
+func newEndSet(terms []string, ends string) *endSet {
+	s := &endSet{}
+	for _, t := range terms {
+		switch len(t) {
+		case 0:
+			continue
+		case 1:
+			s.term1[t[0]] = true
+		default:
+			s.multi = append(s.multi, []byte(t))
+		}
+		s.first[t[0]] = true
+		if len(t) > s.maxTerm {
+			s.maxTerm = len(t)
+		}
+	}
+	for i := 0; i < len(ends); i++ {
+		s.ends[ends[i]] = true
+		s.first[ends[i]] = true
+	}
+	if s.maxTerm == 0 && len(ends) == 0 {
+		return nil
+	}
+	return s
+}
+
+// hold returns the most bytes at the end of what has been seen that may be
+// the start of a terminator not yet complete.
+func (s *endSet) hold() int {
+	if s.maxTerm > 1 {
+		return s.maxTerm - 1
+	}
+	return 0
+}
+
+// find looks for the end of a sequence in seen, starting at from.  It
+// returns where the sequence's own bytes end and how many bytes after that
+// belong to its terminator (0 if it ended before a byte from ends).  It
+// returns -1, 0 if the end is not in seen yet.  At any one place a
+// multi-byte terminator is preferred to a one-byte terminator, and both to a
+// byte from ends.
+func (s *endSet) find(seen []byte, from int) (int, int) {
+	for i := from; i < len(seen); i++ {
+		c := seen[i]
+		if !s.first[c] {
+			continue
+		}
+		rest := seen[i:]
+		for _, t := range s.multi {
+			if bytes.HasPrefix(rest, t) {
+				return i, len(t)
+			}
+		}
+		if s.term1[c] {
+			return i, 1
+		}
+		// A multi-byte terminator may yet start here once more
+		// bytes arrive.
+		for _, t := range s.multi {
+			if len(rest) < len(t) && bytes.HasPrefix(t, rest) {
+				return -1, 0
+			}
+		}
+		if s.ends[c] {
+			return i, 0
+		}
+	}
+	return -1, 0
+}
+
+// A FilterFunc decides what to record for a sequence registered with
+// AddFilterSequence.  Raw holds the sequence's bytes from its introducer on.
+//
+// When complete is true raw is the whole sequence, including its terminator
+// if it had one, and out is what to record in its place (nil for nothing).
+// Keep is ignored.
+//
+// When complete is false the sequence has grown past its limit and raw is
+// only its start.  If keep is true, out is recorded and the rest of the
+// sequence is recorded as it arrives, without calling the FilterFunc again.
+// If keep is false nothing more of the sequence is kept or recorded.
+type FilterFunc func(e *EscapeBuffer, raw []byte, complete bool) (out []byte, keep bool)
+
 type seqCall struct {
 	seq      []byte
-	terms    [][]byte // each terminates the sequence; the earliest wins
-	maxTerm  int      // length of the longest of terms
-	ends     string   // bytes that end the sequence but are not part of it
-	drop     bool     // never recorded; keep only enough of seen to find the end
-	seen     []byte   // bytes we have seen so far
+	end      *endSet // nil if the sequence is complete once seq is seen
+	limit    int     // bytes a FilterFunc sequence may hold before deciding
 	callback func(*EscapeBuffer, []byte) bool
+	filter   FilterFunc
+
+	// The state of an open sequence.
+	seen   []byte // bytes seen so far (after seq) and not yet dealt with
+	drop   bool   // record nothing more; keep only enough of seen to find the end
+	stream bool   // record each byte as it arrives
 }
 
 type EscapeBuffer struct {
@@ -54,7 +151,9 @@ type EscapeBuffer struct {
 	inalt      bool
 	firstBytes string
 	sequences  []seqCall
-	inseq      *seqCall
+	inseq      *seqCall // the open sequence (&open), or nil
+	open       seqCall
+	raw        []byte // scratch space for the raw bytes passed to a FilterFunc
 }
 
 func NewEscapeBuffer(n int) *EscapeBuffer {
@@ -100,99 +199,57 @@ func (e *EscapeBuffer) AddReportSequence(seq, term string, f func(*EscapeBuffer,
 //
 // A terminator is found even when it is split across calls to Write.
 func (e *EscapeBuffer) AddReportSequenceTerms(seq string, terms []string, ends string, f func(*EscapeBuffer, []byte) bool) {
-	e.addReport(seq, terms, ends, false, f)
-}
-
-// AddDropSequence is AddReportSequenceTerms for a sequence that is never
-// recorded and whose contents are never needed.  While it is open only the
-// last few bytes are kept (enough to find a terminator split across writes),
-// so a long or unterminated one does not use memory.
-func (e *EscapeBuffer) AddDropSequence(seq string, terms []string, ends string) {
-	e.addReport(seq, terms, ends, true, func(*EscapeBuffer, []byte) bool {
-		return false
-	})
-}
-
-func (e *EscapeBuffer) addReport(seq string, terms []string, ends string, drop bool, f func(*EscapeBuffer, []byte) bool) {
 	if len(seq) == 0 {
 		return
 	}
-	var bterms [][]byte
-	maxTerm := 0
-	for _, t := range terms {
-		if t != "" {
-			bterms = append(bterms, []byte(t))
-			if len(t) > maxTerm {
-				maxTerm = len(t)
-			}
-		}
-	}
-	if len(bterms) == 0 && ends == "" {
+	end := newEndSet(terms, ends)
+	if end == nil {
 		e.AddSequence(seq, func(*EscapeBuffer) bool {
 			return f(e, nil)
 		})
 		return
 	}
-
-	if strings.IndexByte(e.firstBytes, seq[0]) < 0 {
-		e.firstBytes += string(seq[:1])
-	}
-	e.sequences = append(e.sequences, seqCall{
+	e.addSeqCall(seqCall{
 		seq:      []byte(seq),
-		terms:    bterms,
-		maxTerm:  maxTerm,
-		ends:     ends,
-		drop:     drop,
+		end:      end,
 		callback: f,
 	})
 }
 
-// indexTerm returns the index in buf of the earliest of terms and that
-// term's length, or -1, 0 if none of them is in buf.
-func indexTerm(buf []byte, terms [][]byte) (int, int) {
-	x, n := -1, 0
-	for _, t := range terms {
-		if i := bytes.Index(buf, t); i >= 0 && (x < 0 || i < x) {
-			x, n = i, len(t)
-		}
+// AddFilterSequence arranges for f to decide what is recorded for each
+// sequence that starts with seq and ends as described for
+// AddReportSequenceTerms.  F is first called once the sequence is complete
+// or, if limit is positive, once more than limit bytes past seq have arrived
+// without it completing.  With no terms or ends, the sequence is just seq.
+func (e *EscapeBuffer) AddFilterSequence(seq string, terms []string, ends string, limit int, f FilterFunc) {
+	if len(seq) == 0 {
+		return
 	}
-	return x, n
+	e.addSeqCall(seqCall{
+		seq:    []byte(seq),
+		end:    newEndSet(terms, ends),
+		limit:  limit,
+		filter: f,
+	})
 }
 
-// findEnd looks for the end of s in s.seen, starting at from.  It returns
-// where the sequence's own bytes end and how many bytes after that belong to
-// its terminator (0 if it ended before a byte from s.ends).  It returns
-// -1, 0 if the end is not in s.seen yet.
-func (s *seqCall) findEnd(from int) (int, int) {
-	x, tl := indexTerm(s.seen[from:], s.terms)
-	if x >= 0 {
-		x += from
+func (e *EscapeBuffer) addSeqCall(s seqCall) {
+	if strings.IndexByte(e.firstBytes, s.seq[0]) < 0 {
+		e.firstBytes += string(s.seq[:1])
 	}
-	y := bytes.IndexAny(s.seen[from:], s.ends)
-	if y < 0 {
-		return x, tl
-	}
-	y += from
-	if x >= 0 && x <= y {
-		return x, tl
-	}
-	// A term may yet start at y once more bytes arrive.
-	rest := s.seen[y:]
-	for _, t := range s.terms {
-		if len(rest) < len(t) && bytes.HasPrefix(t, rest) {
-			return -1, 0
-		}
-	}
-	return y, 0
+	e.sequences = append(e.sequences, s)
 }
 
-// trim discards all but the last maxTerm-1 bytes of s.seen, the most that a
-// terminator split across writes can have in it so far.
+// filterRaw calls s.filter with s.seq followed by body.
+func (e *EscapeBuffer) filterRaw(s *seqCall, body []byte, complete bool) ([]byte, bool) {
+	e.raw = append(append(e.raw[:0], s.seq...), body...)
+	return s.filter(e, e.raw, complete)
+}
+
+// trim discards all but the last few bytes of s.seen, the most that can be
+// the start of a terminator not yet complete.
 func (s *seqCall) trim() {
-	if keep := s.maxTerm - 1; len(s.seen) > keep {
-		if keep < 0 {
-			keep = 0
-		}
+	if keep := s.end.hold(); len(s.seen) > keep {
 		s.seen = append(s.seen[:0], s.seen[len(s.seen)-keep:]...)
 	}
 }
@@ -292,24 +349,55 @@ Loop:
 			// enough back to catch one that began in an
 			// earlier write.  A terminator that ended in an
 			// earlier write would already have been found.
+			// Most sequences start and end in one write; for
+			// them buf is searched where it is, without
+			// copying it.
 			seq := e.inseq
-			from := len(seq.seen) - (seq.maxTerm - 1)
-			if from < 0 {
-				from = 0
-			}
-			seq.seen = append(seq.seen, buf...)
-			x, tl := seq.findEnd(from)
-			if x < 0 {
-				if seq.drop {
-					seq.trim()
+			hold := seq.end.hold()
+			data, from := buf, 0
+			if len(seq.seen) > 0 {
+				from = len(seq.seen) - hold
+				if from < 0 {
+					from = 0
 				}
+				seq.seen = append(seq.seen, buf...)
+				data = seq.seen
+			}
+			x, tl := seq.end.find(data, from)
+			if x < 0 {
+				if len(seq.seen) == 0 {
+					seq.seen = append(seq.seen, buf...)
+				}
+				switch {
+				case seq.drop:
+				case seq.stream:
+					e.add(seq.seen[:len(seq.seen)-hold])
+				case seq.filter != nil && seq.limit > 0 && len(seq.seen) > seq.limit:
+					out, keep := e.filterRaw(seq, seq.seen[:len(seq.seen)-hold], false)
+					if keep {
+						e.add(out)
+						seq.stream = true
+					} else {
+						seq.drop = true
+					}
+				default:
+					return n, nil
+				}
+				seq.trim()
 				return n, nil
 			}
 			e.inseq = nil
-			if seq.callback(e, seq.seen[:x]) {
-				e.add(seq.seen[:x])
+			switch {
+			case seq.drop:
+			case seq.stream:
+				e.add(data[:x+tl])
+			case seq.filter != nil:
+				out, _ := e.filterRaw(seq, data[:x+tl], true)
+				e.add(out)
+			case seq.callback(e, data[:x]):
+				e.add(data[:x])
 			}
-			buf = seq.seen[x+tl:]
+			buf = data[x+tl:]
 		}
 
 		x := bytes.IndexAny(buf, e.firstBytes)
@@ -324,9 +412,14 @@ Loop:
 		for _, s := range e.sequences {
 			if len(buf) >= len(s.seq) {
 				if bytes.Equal(buf[:len(s.seq)], s.seq) {
-					if len(s.terms) > 0 || s.ends != "" {
-						seq := s
-						e.inseq = &seq
+					if s.end != nil {
+						// Only one sequence is open at a
+						// time, so e.open holds it.
+						e.open = s
+						e.inseq = &e.open
+					} else if s.filter != nil {
+						out, _ := s.filter(e, s.seq, true)
+						e.add(out)
 					} else if s.callback(e, nil) {
 						e.add(s.seq)
 					}

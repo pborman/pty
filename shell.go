@@ -119,30 +119,6 @@ const (
 	home    = "\033[H"
 	sendSSH = "\033[z"
 	ctrlC   = '\003'
-
-	// ropenQuery is how ropen asks an iPadSSH terminal for its current
-	// receiver address.  The terminal answers by typing
-	// "#ROPEN HOST:PORT/TOKEN NEPOR#" into the input.  Replaying the
-	// query on a reconnect would make the terminal type a stale answer
-	// at whatever is reading input, so it is never recorded.
-	ropenQuery = "\033]7717;ropen\007"
-
-	// osc52 starts an OSC 52 (manipulate selection data) sequence,
-	// which ends with BEL or ESC \.  It either sets a clipboard or,
-	// with a body of "?", asks the terminal to type the clipboard's
-	// contents into the input.  Replaying either on a reconnect would
-	// set the clipboard to a stale value or type the clipboard at
-	// whatever is reading input, so it is passed to the attached
-	// clients but never recorded.
-	osc52 = "\033]52;"
-)
-
-// An OSC 52 ends the way a terminal ends any OSC: with BEL or ST (ESC \),
-// aborted by CAN or SUB, or just before any other ESC, which starts the next
-// escape sequence (including another OSC).
-var (
-	osc52Terms = []string{"\007", "\033\\", "\030", "\032"}
-	osc52Ends  = "\033"
 )
 
 // A ShellClient can be attached to a Shell.
@@ -207,37 +183,7 @@ func NewShell(session *Session) *Shell {
 		eb:      NewEscapeBuffer(0),
 		session: session,
 	}
-	s.eb.AddSequence(sendSSH, func(eb *EscapeBuffer) bool {
-		return false
-	})
-	s.eb.AddSequence(ropenQuery, func(eb *EscapeBuffer) bool {
-		return false
-	})
-	s.eb.AddDropSequence(osc52, osc52Terms, osc52Ends)
-	s.eb.AddSequence(scasb, func(eb *EscapeBuffer) bool {
-		eb.inalt = true
-		return false
-	})
-	s.eb.AddSequence(nsbrc, func(eb *EscapeBuffer) bool {
-		eb.inalt = false
-		return false
-	})
-	s.eb.AddSequence(edsaved, func(eb *EscapeBuffer) bool {
-		if !eb.inalt {
-			eb.normal = eb.normal[:0]
-			eb.normal = append(eb.normal, []byte(nsbrc)...)
-			eb.normal = append(eb.normal, []byte(edall)...)
-		}
-		return false
-	})
-	s.eb.AddSequence(edall, func(eb *EscapeBuffer) bool {
-		if eb.inalt {
-			eb.alt = eb.alt[:0]
-			eb.alt = append(eb.alt, []byte(home)...)
-			eb.alt = append(eb.alt, []byte(edall)...)
-		}
-		return false
-	})
+	addRecordFilters(s.eb)
 	return s
 }
 

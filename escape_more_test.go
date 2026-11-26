@@ -16,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -257,9 +258,12 @@ func TestAddReportSequenceTermsEnds(t *testing.T) {
 	}
 }
 
-func TestAddDropSequenceKeepsLittle(t *testing.T) {
+// dropAll is a FilterFunc that records nothing.
+func dropAll(*EscapeBuffer, []byte, bool) ([]byte, bool) { return nil, false }
+
+func TestFilterSequenceDropKeepsLittle(t *testing.T) {
 	e := NewEscapeBuffer(64)
-	e.AddDropSequence("\033]52;", []string{"\a", "\033\\"}, "\033")
+	e.AddFilterSequence("\033]52;", []string{"\a", "\033\\"}, "\033", 16, dropAll)
 	e.Write([]byte("a\033]52;c;"))
 	chunk := bytes.Repeat([]byte("QUJD"), 1024)
 	for i := 0; i < 100; i++ {
@@ -283,17 +287,9 @@ func TestAddDropSequenceKeepsLittle(t *testing.T) {
 	}
 }
 
-func TestAddDropSequenceEmpty(t *testing.T) {
+func TestFilterSequenceEndsOnly(t *testing.T) {
 	e := NewEscapeBuffer(64)
-	e.AddDropSequence("", []string{"\a"}, "")
-	if len(e.sequences) != 0 {
-		t.Error("empty drop sequence should be ignored")
-	}
-}
-
-func TestAddDropSequenceEndsOnly(t *testing.T) {
-	e := NewEscapeBuffer(64)
-	e.AddDropSequence("@{", nil, "}")
+	e.AddFilterSequence("@{", nil, "}", 2, dropAll)
 	e.Write([]byte("a@{xxx"))
 	if e.inseq == nil || len(e.inseq.seen) != 0 {
 		t.Fatalf("open sequence = %+v, want one holding nothing", e.inseq)
@@ -301,6 +297,95 @@ func TestAddDropSequenceEndsOnly(t *testing.T) {
 	e.Write([]byte("yyy}b"))
 	e.Flush()
 	if got, want := string(e.normal), "a}b"; got != want {
+		t.Errorf("buffer = %q, want %q", got, want)
+	}
+}
+
+func TestFilterSequenceEmpty(t *testing.T) {
+	e := NewEscapeBuffer(64)
+	e.AddFilterSequence("", []string{"\a"}, "", 0, dropAll)
+	if len(e.sequences) != 0 {
+		t.Error("empty filter sequence should be ignored")
+	}
+}
+
+func TestFilterSequenceNoEnd(t *testing.T) {
+	e := NewEscapeBuffer(64)
+	e.AddFilterSequence("XY", nil, "", 0, func(_ *EscapeBuffer, raw []byte, complete bool) ([]byte, bool) {
+		if !complete || string(raw) != "XY" {
+			t.Errorf("filter(%q, %v)", raw, complete)
+		}
+		return []byte("<>"), false
+	})
+	e.Write([]byte("aXYb"))
+	e.Flush()
+	if got, want := string(e.normal), "a<>b"; got != want {
+		t.Errorf("buffer = %q, want %q", got, want)
+	}
+}
+
+func TestFilterSequenceComplete(t *testing.T) {
+	e := NewEscapeBuffer(64)
+	var raws []string
+	e.AddFilterSequence("<", []string{">", "]]"}, "", 0, func(_ *EscapeBuffer, raw []byte, complete bool) ([]byte, bool) {
+		raws = append(raws, string(raw))
+		return []byte(strings.ToUpper(string(raw))), false
+	})
+	e.Write([]byte("a<x>b<y]"))
+	e.Write([]byte("]c"))
+	e.Flush()
+	if want := []string{"<x>", "<y]]"}; strings.Join(raws, ",") != strings.Join(want, ",") {
+		t.Errorf("filter saw %q, want %q", raws, want)
+	}
+	if got, want := string(e.normal), "a<X>b<Y]]c"; got != want {
+		t.Errorf("buffer = %q, want %q", got, want)
+	}
+}
+
+func TestFilterSequenceStream(t *testing.T) {
+	e := NewEscapeBuffer(1024)
+	var calls []string
+	e.AddFilterSequence("<", []string{">>"}, "", 4, func(_ *EscapeBuffer, raw []byte, complete bool) ([]byte, bool) {
+		calls = append(calls, fmt.Sprintf("%q %v", raw, complete))
+		return []byte("[" + string(raw[1:]) + "]"), true
+	})
+	e.Write([]byte("a<123"))
+	e.Write([]byte("4567>"))
+	e.Write([]byte(">8<9>>b"))
+	e.Flush()
+	// The first sequence goes past its limit holding "1234567>", of which
+	// the last byte may start ">>", so the filter sees "<1234567" and the
+	// rest is recorded as it arrives.  The second completes in time.
+	if want := []string{`"<1234567" false`, `"<9>>" true`}; strings.Join(calls, ",") != strings.Join(want, ",") {
+		t.Errorf("filter calls %q, want %q", calls, want)
+	}
+	if got, want := string(e.normal), "a[1234567]>>8[9>>]b"; got != want {
+		t.Errorf("buffer = %q, want %q", got, want)
+	}
+}
+
+func TestEndSetEmpty(t *testing.T) {
+	if s := newEndSet([]string{""}, ""); s != nil {
+		t.Errorf("newEndSet of nothing = %+v, want nil", s)
+	}
+}
+
+func TestReportSequenceLongTermSplit(t *testing.T) {
+	e := NewEscapeBuffer(64)
+	var seen []string
+	e.AddReportSequence("<", "]]]", func(_ *EscapeBuffer, data []byte) bool {
+		seen = append(seen, string(data))
+		return false
+	})
+	e.Write([]byte("a<"))
+	e.Write([]byte("x"))
+	e.Write([]byte("]]"))
+	e.Write([]byte("]b"))
+	e.Flush()
+	if len(seen) != 1 || seen[0] != "x" {
+		t.Errorf("payload = %q, want [x]", seen)
+	}
+	if got, want := string(e.normal), "ab"; got != want {
 		t.Errorf("buffer = %q, want %q", got, want)
 	}
 }
