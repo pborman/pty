@@ -151,6 +151,7 @@ func (c *Client) nextBuf() mBuffer {
 }
 
 func (c *Client) Name() string {
+	defer c.mu.Lock("Name")()
 	return c.name
 }
 

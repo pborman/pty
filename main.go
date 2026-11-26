@@ -440,19 +440,44 @@ func main() {
 var (
 	ackerMu sync.Mutex
 	ackers  = map[[16]byte]chan struct{}{}
-	psChan  chan []byte
+
+	// psChan is where the answer to the pending ps request goes, or nil
+	// if none is pending.  It is buffered so that clientCommand never
+	// blocks on it.
+	psMu   sync.Mutex
+	psChan chan []byte
 )
 
 func ps(w *MessengerWriter) []byte {
-	// Don't let clientCommand hang if psMessage comes in
-	// after our 15 second timeout.
-	psChan = make(chan []byte, 1)
+	ch := make(chan []byte, 1)
+	psMu.Lock()
+	psChan = ch
+	psMu.Unlock()
+	defer func() {
+		psMu.Lock()
+		if psChan == ch {
+			psChan = nil
+		}
+		psMu.Unlock()
+	}()
 	w.Send(psMessage, nil)
 	select {
-	case data := <-psChan:
+	case data := <-ch:
 		return data
 	case <-time.After(15 * time.Second):
 		return nil
+	}
+}
+
+// psAnswer passes data, the answer to a ps request, to ps.  An answer that
+// arrives after ps has given up is dropped.
+func psAnswer(data []byte) {
+	psMu.Lock()
+	ch := psChan
+	psChan = nil
+	psMu.Unlock()
+	if ch != nil {
+		ch <- data
 	}
 }
 
@@ -479,10 +504,7 @@ func clientCommand(w *MessengerWriter, kind messageKind, data []byte, ready chan
 	case pingMessage:
 		w.Send(ackMessage, data)
 	case psMessage:
-		if psChan != nil {
-			psChan <- data
-			close(psChan)
-		}
+		psAnswer(data)
 	case ackMessage:
 		ackerMu.Lock()
 		defer ackerMu.Unlock()

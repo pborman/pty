@@ -258,13 +258,18 @@ func (s *Shell) CountClients() int {
 	return cnt
 }
 
+// Take makes c the primary client.
+//
+// The locks are taken in the order used everywhere else: s.mu first, then a
+// client's mu.  Taking c.mu first deadlocked two clients taking the session
+// at once, each holding its own lock and waiting for the other's.
 func (s *Shell) Take(c *Client, requestSize bool) {
-	defer c.mu.Lock("Take1")()
-	if c.primary {
+	defer s.mu.Lock("Take1")()
+	if s.primary == c {
 		return
 	}
-	defer s.mu.Lock("Take2")()
 	log.Infof("client %s takes the session", c.Name())
+	defer c.mu.Lock("Take2")()
 	for oc := range s.clients {
 		if oc == c {
 			continue

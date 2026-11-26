@@ -177,10 +177,13 @@ func TestClientCommand(t *testing.T) {
 	// fmt.Printf. Re-run without capture by checking buf instead.
 	_ = out
 
-	psChan = make(chan []byte, 1)
+	pc := make(chan []byte, 1)
+	psMu.Lock()
+	psChan = pc
+	psMu.Unlock()
 	clientCommand(w, psMessage, []byte("ps-data"), ready, sess)
 	select {
-	case got := <-psChan:
+	case got := <-pc:
 		if string(got) != "ps-data" {
 			t.Errorf("psChan = %q", got)
 		}
