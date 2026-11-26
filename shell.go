@@ -171,7 +171,6 @@ type Shell struct {
 	Env        []string
 	cmd        *exec.Cmd
 	pty        *os.File
-	tty        *os.File // master side
 	session    *Session
 	started    chan struct{}
 	done       chan struct{}
@@ -446,40 +445,6 @@ func (s *Shell) Start(debug bool) error {
 		Setctty: true,
 	}
 
-	if false {
-		fd, tty, err := pty.Open()
-		if err != nil {
-			return err
-		}
-		ws := pty.Winsize{Rows: 24, Cols: 80}
-		if err := pty.Setsize(fd, &ws); err != nil {
-			log.Infof("Setsize failed (non-fatal on some macOS setups): %v", err)
-		}
-		/*
-			// This does not return an error but pty.Setsize still fails.
-			if err := GrantPT(fd.Fd()); err != nil {
-				log.Infof("GrantPT of fd.Fd(): %v", err)
-			}
-			if err := GrantPT(tty.Fd()); err != nil {
-				log.Infof("GrantPT of tty.Fd(): %v", err)
-			}
-		*/
-
-		defer func() {
-			checkClose(tty)
-		}()
-		s.cmd.Stdout = tty
-		s.cmd.Stdin = tty
-		s.cmd.Stderr = tty
-		err = s.cmd.Start()
-		if err != nil {
-			log.Infof("Command failed to start: %v", err)
-			checkClose(fd)
-			return err
-		}
-		s.pty = fd
-		s.tty = tty
-	}
 	ptmx, err := pty.StartWithAttrs(s.cmd, nil, s.cmd.SysProcAttr)
 	if err != nil {
 		log.Infof("Command failed to start: %v", err)
