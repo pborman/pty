@@ -69,9 +69,7 @@ func TestEscapeBufferAltRouting(t *testing.T) {
 		})
 
 		t.Run(tt.name, func(t *testing.T) {
-			tlog = func(format string, v ...interface{}) {
-				t.Logf(format, v...)
-			}
+			setTlog(t)
 			for _, in := range tt.input {
 				e.Write([]byte(in))
 			}
@@ -166,9 +164,7 @@ func TestEscapeBuffer(t *testing.T) {
 		}
 
 		t.Run(tt.name, func(t *testing.T) {
-			tlog = func(format string, v ...interface{}) {
-				t.Logf(format, v...)
-			}
+			setTlog(t)
 			for _, in := range tt.input {
 				e.Write([]byte(in))
 			}
@@ -181,4 +177,16 @@ func TestEscapeBuffer(t *testing.T) {
 			}
 		})
 	}
+}
+
+// setTlog sends the escape buffer's trace output to t's log until t ends.
+// tlog is a global, so it must be put back: left pointing at t it makes any
+// later test that writes to an EscapeBuffer log to a test that has finished,
+// which panics.
+func setTlog(t *testing.T) {
+	old := tlog
+	tlog = func(format string, v ...interface{}) {
+		t.Logf(format, v...)
+	}
+	t.Cleanup(func() { tlog = old })
 }
