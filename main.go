@@ -331,80 +331,46 @@ func main() {
 		hexdumps.Dump("CLR", screen)
 		w.Send(clearMessage, screen)
 	}
-	state := 0
+	esc := escapeKey{key: session.tilde}
+	echo := func(b []byte) { os.Stdout.Write(b) }
 	<-ready
 	for {
-		// This was rerr -- Remove this comment if we see no bad effects
 		n, err := os.Stdin.Read(buf[:readSize])
 		hexdumps.Dump("IN", buf[:n])
 		n = copy(buf[:], cf.Filter(buf[:n], sendClear))
 
-		var cmd byte
-		if session.tilde != 0 {
-		Loop:
-			// Look tilde followed by . or :
-			for _, c := range buf[:n] {
-				switch state {
-				case 0:
-					switch c {
-					case session.tilde:
-						state = 1
-					}
-				case 1:
-					switch c {
-					case '.', ':':
-						cmd = c
-						state = 2
-						break Loop
-					case session.tilde:
-						// we should probably strip one of the two tilde's.
-						n = 0
-						state = 0
-						w.Write([]byte{session.tilde})
-						break Loop
-					default:
-						state = 0
-					}
+		// A read may hold commands, each followed by more input.
+		for data := buf[:n]; ; {
+			input, cmd, rest := esc.Scan(data)
+			if len(input) > 0 {
+				if opts.Grok {
+					input = bytes.ReplaceAll(input, []byte{0x7f}, []byte{0x08})
+				}
+				hexdumps.Dump("SND", input)
+				_, err2 := w.Write(input)
+				if err == nil {
+					err = err2
 				}
 			}
-			if state >= 1 {
-				n -= state
+			if err != nil {
+				log.Infof("Exiting on error %v", err)
+				exit(0)
 			}
-		}
-		if n > 0 {
-			input := buf[:n]
-			if opts.Grok {
-				input = bytes.ReplaceAll(input, []byte{0x7f}, []byte{0x08})
+			if cmd == 0 {
+				break
 			}
-			hexdumps.Dump("SND", input)
-			_, err2 := w.Write(input)
-			if err == nil {
-				err = err2
-			}
-		}
-		if err != nil {
-			log.Infof("Exiting on error %v", err)
-			exit(0)
-		}
-		if cmd != 0 {
 			log.Infof("request command %q", cmd)
-		}
-		switch cmd {
-		case 0:
-			continue
-		case session.tilde:
-			if _, err := os.Stdout.Write([]byte{session.tilde}); err != nil {
-				log.Infof("%v", err)
+			if cmd == '.' {
+				if _, err := os.Stdout.Write([]byte("\r\n")); err != nil {
+					log.Infof("%v", err)
+				}
+				exit(0)
 			}
-		case '.':
-			if _, err := os.Stdout.Write([]byte("\r\n")); err != nil {
-				log.Infof("%v", err)
-			}
-			exit(0)
-		case ':':
+			// cmd is ':'.  What was typed after it in the same
+			// read starts the command line.
 			session.MakeCooked()
 			fmt.Printf("\nCommand: ")
-			line, err := readline()
+			line, more, err := lineFrom(rest, echo, readline)
 			if err != nil {
 				exitf("readline: %v\n", err)
 			}
@@ -418,25 +384,8 @@ func main() {
 				exitf("stty: %v\n", err)
 			}
 			command(true, session, w, args...)
+			data = more
 		}
-
-		state = 0
-		/*
-			 * Remove this commit if we decide rerr was really not needed.
-			 * Turn this back into code if rerr was neeeded.
-			if rerr != nil {
-				log.Errorf("client read from stdin(%d): %v", os.Stdin.Fd(), rerr)
-				ecnt++
-				if ecnt > 10 {
-					if !strings.Contains(rerr.Error(), "broken pipe") {
-						exitf("%v", rerr)
-					}
-					exit(0)
-				}
-			} else {
-				ecnt = 0
-			}
-		*/
 	}
 }
 
