@@ -192,6 +192,8 @@ func (s *Shell) attach(c net.Conn) {
 				} else {
 					mw.Sendf(serverMessage, "screen saved to %s\r\n", msg)
 				}
+			case clearMessage:
+				s.ClearScreen(client, msg)
 			case escapeMessage:
 				unlock := s.mu.Lock("escapeMessage")
 				s.eb.sendEscapes(mw, strings.ToLower(string(msg)) == "alt")

@@ -320,13 +320,21 @@ func main() {
 	// Below is the code that reads from stdin and writes to the server.
 	watchSigwinch(w, session)
 	w.Sendf(ttynameMessage, "%d:%s", os.Getpid(), myname)
-	var buf [32768]byte
+	const readSize = 32768
+	// Room for a held-back partial clear sequence released by the filter.
+	var buf [readSize + len(clearIntro)]byte
+	var cf clearFilter
+	sendClear := func(screen []byte) {
+		hexdumps.Dump("CLR", screen)
+		w.Send(clearMessage, screen)
+	}
 	state := 0
 	<-ready
 	for {
 		// This was rerr -- Remove this comment if we see no bad effects
-		n, err := os.Stdin.Read(buf[:])
+		n, err := os.Stdin.Read(buf[:readSize])
 		hexdumps.Dump("IN", buf[:n])
+		n = copy(buf[:], cf.Filter(buf[:n], sendClear))
 
 		var cmd byte
 		if session.tilde != 0 {

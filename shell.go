@@ -70,7 +70,8 @@ const (
 	psMessage
 	pingMessage
 	ackMessage
-	dumpMessage // Cause the server to dump
+	dumpMessage  // Cause the server to dump
+	clearMessage // The terminal was cleared; see clear.go
 )
 
 var messageNames = map[messageKind]string{
@@ -93,6 +94,7 @@ var messageNames = map[messageKind]string{
 	pingMessage:      "pingMessage",
 	ackMessage:       "ackMessage",
 	dumpMessage:      "dumpMessage",
+	clearMessage:     "clearMessage",
 }
 
 func (m messageKind) String() string {
