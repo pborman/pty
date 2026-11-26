@@ -256,3 +256,51 @@ func TestAddReportSequenceTermsEnds(t *testing.T) {
 		t.Errorf("buffer = %q, want %q", got, want)
 	}
 }
+
+func TestAddDropSequenceKeepsLittle(t *testing.T) {
+	e := NewEscapeBuffer(64)
+	e.AddDropSequence("\033]52;", []string{"\a", "\033\\"}, "\033")
+	e.Write([]byte("a\033]52;c;"))
+	chunk := bytes.Repeat([]byte("QUJD"), 1024)
+	for i := 0; i < 100; i++ {
+		e.Write(chunk)
+		if e.inseq == nil {
+			t.Fatal("sequence ended early")
+		}
+		if n := len(e.inseq.seen); n > 1 {
+			t.Fatalf("after %d writes the open sequence holds %d bytes", i+1, n)
+		}
+	}
+	if c := cap(e.inseq.seen); c > 2*len(chunk) {
+		t.Errorf("open sequence has capacity %d, want at most %d", c, 2*len(chunk))
+	}
+	// A terminator split across writes is still found.
+	e.Write([]byte("QUJD\033"))
+	e.Write([]byte("\\b"))
+	e.Flush()
+	if got, want := string(e.normal), "ab"; got != want {
+		t.Errorf("buffer = %q, want %q", got, want)
+	}
+}
+
+func TestAddDropSequenceEmpty(t *testing.T) {
+	e := NewEscapeBuffer(64)
+	e.AddDropSequence("", []string{"\a"}, "")
+	if len(e.sequences) != 0 {
+		t.Error("empty drop sequence should be ignored")
+	}
+}
+
+func TestAddDropSequenceEndsOnly(t *testing.T) {
+	e := NewEscapeBuffer(64)
+	e.AddDropSequence("@{", nil, "}")
+	e.Write([]byte("a@{xxx"))
+	if e.inseq == nil || len(e.inseq.seen) != 0 {
+		t.Fatalf("open sequence = %+v, want one holding nothing", e.inseq)
+	}
+	e.Write([]byte("yyy}b"))
+	e.Flush()
+	if got, want := string(e.normal), "a}b"; got != want {
+		t.Errorf("buffer = %q, want %q", got, want)
+	}
+}

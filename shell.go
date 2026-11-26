@@ -213,9 +213,7 @@ func NewShell(session *Session) *Shell {
 	s.eb.AddSequence(ropenQuery, func(eb *EscapeBuffer) bool {
 		return false
 	})
-	s.eb.AddReportSequenceTerms(osc52, osc52Terms, osc52Ends, func(*EscapeBuffer, []byte) bool {
-		return false
-	})
+	s.eb.AddDropSequence(osc52, osc52Terms, osc52Ends)
 	s.eb.AddSequence(scasb, func(eb *EscapeBuffer) bool {
 		eb.inalt = true
 		return false

@@ -42,6 +42,7 @@ type seqCall struct {
 	terms    [][]byte // each terminates the sequence; the earliest wins
 	maxTerm  int      // length of the longest of terms
 	ends     string   // bytes that end the sequence but are not part of it
+	drop     bool     // never recorded; keep only enough of seen to find the end
 	seen     []byte   // bytes we have seen so far
 	callback func(*EscapeBuffer, []byte) bool
 }
@@ -99,6 +100,20 @@ func (e *EscapeBuffer) AddReportSequence(seq, term string, f func(*EscapeBuffer,
 //
 // A terminator is found even when it is split across calls to Write.
 func (e *EscapeBuffer) AddReportSequenceTerms(seq string, terms []string, ends string, f func(*EscapeBuffer, []byte) bool) {
+	e.addReport(seq, terms, ends, false, f)
+}
+
+// AddDropSequence is AddReportSequenceTerms for a sequence that is never
+// recorded and whose contents are never needed.  While it is open only the
+// last few bytes are kept (enough to find a terminator split across writes),
+// so a long or unterminated one does not use memory.
+func (e *EscapeBuffer) AddDropSequence(seq string, terms []string, ends string) {
+	e.addReport(seq, terms, ends, true, func(*EscapeBuffer, []byte) bool {
+		return false
+	})
+}
+
+func (e *EscapeBuffer) addReport(seq string, terms []string, ends string, drop bool, f func(*EscapeBuffer, []byte) bool) {
 	if len(seq) == 0 {
 		return
 	}
@@ -127,6 +142,7 @@ func (e *EscapeBuffer) AddReportSequenceTerms(seq string, terms []string, ends s
 		terms:    bterms,
 		maxTerm:  maxTerm,
 		ends:     ends,
+		drop:     drop,
 		callback: f,
 	})
 }
@@ -168,6 +184,17 @@ func (s *seqCall) findEnd(from int) (int, int) {
 		}
 	}
 	return y, 0
+}
+
+// trim discards all but the last maxTerm-1 bytes of s.seen, the most that a
+// terminator split across writes can have in it so far.
+func (s *seqCall) trim() {
+	if keep := s.maxTerm - 1; len(s.seen) > keep {
+		if keep < 0 {
+			keep = 0
+		}
+		s.seen = append(s.seen[:0], s.seen[len(s.seen)-keep:]...)
+	}
 }
 
 func appendto(old, new []byte) []byte {
@@ -273,6 +300,9 @@ Loop:
 			seq.seen = append(seq.seen, buf...)
 			x, tl := seq.findEnd(from)
 			if x < 0 {
+				if seq.drop {
+					seq.trim()
+				}
 				return n, nil
 			}
 			e.inseq = nil
