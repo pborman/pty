@@ -203,12 +203,20 @@ func (s *Shell) attach(c net.Conn) {
 			}
 		})
 		var data [32 * 1024]byte
+		var answers answerFilter
 		for {
 			var werr error
 			r, rerr := r.Read(data[:])
 			if r > 0 {
-				s.Take(client, true)
-				_, werr = s.Write(data[:r])
+				// Answers to queries are not typed,
+				// so they do not take the session.
+				in, typed := s.FilterInput(client, &answers, data[:r])
+				if typed {
+					s.Take(client, true)
+				}
+				if len(in) > 0 {
+					_, werr = s.Write(in)
+				}
 			}
 			if rerr != nil {
 				log.Warnf("Read from client: %v", rerr)

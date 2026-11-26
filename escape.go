@@ -154,6 +154,17 @@ type EscapeBuffer struct {
 	inseq      *seqCall // the open sequence (&open), or nil
 	open       seqCall
 	raw        []byte // scratch space for the raw bytes passed to a FilterFunc
+
+	// Expect, if not nil, is called by a filter that drops a query
+	// with the key of the answer the terminal will send.
+	Expect func(key string)
+}
+
+// expect calls e.Expect, if it is set, with key, if it is not empty.
+func (e *EscapeBuffer) expect(key string) {
+	if e.Expect != nil && key != "" {
+		e.Expect(key)
+	}
 }
 
 func NewEscapeBuffer(n int) *EscapeBuffer {

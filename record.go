@@ -97,7 +97,10 @@ func addRecordFilters(e *EscapeBuffer) {
 	e.AddFilterSequence(csiIntro, csiTerms, csiEnds, csiLimit, recordCSI)
 	e.AddFilterSequence(oscIntro, oscTerms, stringEnds, stringLimit, recordOSC)
 	e.AddFilterSequence(dcsIntro, dcsTerms, stringEnds, stringLimit, recordDCS)
-	e.AddSequence(decid, func(*EscapeBuffer) bool { return false })
+	e.AddSequence(decid, func(e *EscapeBuffer) bool {
+		e.expect("CSI ?c")
+		return false
+	})
 	e.AddSequence(enq, func(*EscapeBuffer) bool { return false })
 }
 
@@ -169,53 +172,112 @@ func (c csiSeq) is(inter string) bool {
 	return string(c.inter) == inter
 }
 
-// dropped reports whether c is a query or a window manipulation.
-func (c csiSeq) dropped() bool {
+// classify reports whether c is dropped from the record, which it is if it
+// is a query or a window manipulation.  For a query whose answer pty can
+// recognize, answer is the answer's key (see answerKey); otherwise it is "".
+func (c csiSeq) classify() (drop bool, answer string) {
 	none := c.is("")
 	plain := c.private == 0 && none
 	switch c.final {
 	case 'c': // Primary, Secondary and Tertiary DA
-		return none && (c.private == 0 || c.private == '>' || c.private == '=')
+		if none {
+			switch c.private {
+			case 0:
+				return true, "CSI ?c"
+			case '>':
+				return true, "CSI >c"
+			case '=':
+				return true, "DCS !|"
+			}
+		}
 	case 'n': // DSR, CPR, and the DEC-specific DSRs
 		if !none {
-			return false
+			break
 		}
 		p := c.param(0)
-		return c.private == '?' || c.private == 0 && (p == 5 || p == 6)
-	case 'p': // DECRQM, ANSI and DEC private
-		return c.is("$")
-	case 'q': // XTVERSION
-		return c.private == '>' && none
-	case 'u': // kitty keyboard query, DECRQTSR, DECRQUPSS
-		return c.private == '?' && none || c.is("$") || c.is("&")
-	case 'w': // DECRQPSR
-		return c.is("$")
-	case 'x': // DECREQTPARM
-		return plain
-	case 'y': // DECRQCRA
-		return c.is("*")
-	case '|': // DECRQLP, XTREPORTSGR
-		return c.is("'") || c.is("#")
-	case 'R': // XTREPORTCOLORS
-		return c.is("#")
-	case 'v': // DECRQDE
-		return c.is("\"")
-	case 'm': // XTQMODKEYS
-		return c.private == '?' && none
-	case 'S': // XTSMGRAPHICS read (1) and read maximum (4)
-		if c.private != '?' || !none {
-			return false
+		switch {
+		case c.private == '?' && p == 6: // DECXCPR
+			return true, "CSI ?R"
+		case c.private == '?':
+			return true, "CSI ?n"
+		case c.private == 0 && p == 5:
+			return true, "CSI n"
+		case c.private == 0 && p == 6: // CPR
+			return true, "CSI R"
 		}
-		p := c.param(1)
-		return p == 1 || p == 4
+	case 'p': // DECRQM, ANSI and DEC private
+		if c.is("$") {
+			if c.private == '?' {
+				return true, "CSI ?$y"
+			}
+			return true, "CSI $y"
+		}
+	case 'q': // XTVERSION
+		if c.private == '>' && none {
+			return true, "DCS >|"
+		}
+	case 'u': // kitty keyboard query, DECRQTSR, DECRQUPSS
+		switch {
+		case c.private == '?' && none:
+			return true, "CSI ?u"
+		case c.is("$"):
+			return true, "DCS $s"
+		case c.is("&"):
+			return true, "DCS !u"
+		}
+	case 'w': // DECRQPSR
+		if c.is("$") {
+			return true, "DCS $u"
+		}
+	case 'x': // DECREQTPARM
+		if plain {
+			return true, "CSI x"
+		}
+	case 'y': // DECRQCRA
+		if c.is("*") {
+			return true, "DCS !~"
+		}
+	case '|': // DECRQLP, XTREPORTSGR
+		switch {
+		case c.is("'"):
+			return true, "CSI &w"
+		case c.is("#"):
+			return true, "CSI m"
+		}
+	case 'R': // XTREPORTCOLORS
+		if c.is("#") {
+			return true, ""
+		}
+	case 'v': // DECRQDE
+		if c.is("\"") {
+			return true, "CSI \"w"
+		}
+	case 'm': // XTQMODKEYS
+		if c.private == '?' && none {
+			return true, "CSI >m"
+		}
+	case 'S': // XTSMGRAPHICS read (1) and read maximum (4)
+		if c.private == '?' && none {
+			if p := c.param(1); p == 1 || p == 4 {
+				return true, "CSI ?S"
+			}
+		}
 	case 't': // XTWINOPS: 1-21 manipulate or report, 24+ resize (DECSLPP)
 		if !plain {
-			return false
+			break
 		}
-		p := c.param(0)
-		return p >= 1 && p <= 21 || p >= 24
+		switch p := c.param(0); {
+		case p == 11, p >= 13 && p <= 19 && p != 17:
+			return true, "CSI t"
+		case p == 20:
+			return true, "OSC L"
+		case p == 21:
+			return true, "OSC l"
+		case p >= 1 && p <= 21, p >= 24:
+			return true, ""
+		}
 	}
-	return false
+	return false, ""
 }
 
 // recordCSI is the FilterFunc for control sequences.
@@ -247,8 +309,11 @@ func recordCSI(e *EscapeBuffer, raw []byte, complete bool) ([]byte, bool) {
 		}
 		return nil, false
 	}
-	if c, ok := parseCSI(raw); ok && c.dropped() {
-		return nil, false
+	if c, ok := parseCSI(raw); ok {
+		if drop, answer := c.classify(); drop {
+			e.expect(answer)
+			return nil, false
+		}
 	}
 	return raw, false
 }
@@ -286,23 +351,40 @@ func recordOSC(e *EscapeBuffer, raw []byte, complete bool) ([]byte, bool) {
 	}
 	switch ps {
 	case "52": // clipboard
+		if _, pd, _ := strings.Cut(rest, ";"); pd == "?" {
+			e.expect("OSC 52")
+		}
 		return nil, false
 	case "7717": // ropen
 		if rest == "ropen" {
+			e.expect(ropenAnswer)
 			return nil, false
 		}
 	case "4", "5": // colour number (c;spec pairs)
-		return oscColorPairs(raw, ps, rest, term), false
+		out := oscColorPairs(raw, ps, rest, term)
+		if len(out) != len(raw) {
+			e.expect("OSC " + ps)
+		}
+		return out, false
 	case "10", "11", "12", "13", "14", "15", "16", "17", "18", "19":
+		n, _ := strconv.Atoi(ps)
+		for i, v := range strings.Split(rest, ";") {
+			if v == "?" {
+				e.expect("OSC " + strconv.Itoa(n+i))
+			}
+		}
 		return oscDynamicColors(raw, ps, rest, term), false
 	case "50": // font
 		if strings.HasPrefix(rest, "?") {
+			e.expect("OSC 50")
 			return nil, false
 		}
 	case "60", "61": // XTQALLOWED, XTQDISALLOWED
+		e.expect("OSC " + ps)
 		return nil, false
 	case "1337": // iTerm2
 		if strings.HasPrefix(rest, "ReportCellSize") || strings.HasPrefix(rest, "ReportVariable=") {
+			e.expect("OSC 1337")
 			return nil, false
 		}
 	}
@@ -369,7 +451,12 @@ func recordDCS(e *EscapeBuffer, raw []byte, complete bool) ([]byte, bool) {
 		j++
 	}
 	if j < len(b) && b[j] == 'q' {
-		if inter := string(b[i:j]); inter == "$" || inter == "+" {
+		switch string(b[i:j]) {
+		case "$":
+			e.expect("DCS $r")
+			return nil, false
+		case "+":
+			e.expect("DCS +r")
 			return nil, false
 		}
 	}

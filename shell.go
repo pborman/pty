@@ -163,6 +163,8 @@ type Shell struct {
 	clients    map[*Client]struct{}
 	pids       map[int]*Client
 	eb         *EscapeBuffer
+	primary    *Client                // the client that most recently took the session
+	waits      map[string]*answerWait // answers expected, by key (see answer.go)
 	exiting    bool
 	rows, cols int
 }
@@ -184,6 +186,7 @@ func NewShell(session *Session) *Shell {
 		session: session,
 	}
 	addRecordFilters(s.eb)
+	s.eb.Expect = s.expectAnswer
 	return s
 }
 
@@ -274,6 +277,7 @@ func (s *Shell) Take(c *Client, requestSize bool) {
 		unlock()
 	}
 	c.primary = true
+	s.primary = c
 	c.SendLocked(primaryMessage, nil) // The client should reforward things
 }
 
@@ -287,6 +291,15 @@ func (s *Shell) detach(c *Client) {
 	if _, ok := s.clients[c]; ok {
 		delete(s.clients, c)
 		s.wg.Done()
+	}
+	if s.primary == c {
+		s.primary = nil
+	}
+	// Let another client answer in place of c.
+	for _, w := range s.waits {
+		if w.from == c {
+			w.from = nil
+		}
 	}
 }
 
