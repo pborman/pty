@@ -48,8 +48,18 @@ type clearFilter struct {
 	inBody  bool   // clearIntro seen; collecting base64
 	sawESC  bool   // in the body, an ESC that may start ESC \
 	body    []byte // base64 collected so far
+	tooBig  bool   // the body passed clearBodyLimit and was dropped
 	out     []byte // reused output buffer
 }
+
+// clearBodyLimit is the most base64 a clear sequence may hold: what encodes
+// maxMessage bytes, the most a clearMessage can carry.  A sequence with more
+// is dropped whole.  Its bytes are still taken as part of the sequence, not
+// as typing, up to its terminator or the first byte that cannot be part of
+// it, but they are no longer kept, so a terminal that starts a clear
+// sequence and never ends it cannot make the client grow without limit.
+// Tests change it.
+var clearBodyLimit = base64.StdEncoding.EncodedLen(maxMessage)
 
 func isBase64(c byte) bool {
 	return c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' ||
@@ -77,7 +87,13 @@ func (f *clearFilter) Filter(in []byte, clear func([]byte)) []byte {
 				f.sawESC = true
 				continue
 			case !f.sawESC && isBase64(c):
-				f.body = append(f.body, c)
+				if len(f.body) >= clearBodyLimit {
+					f.body = f.body[:0]
+					f.tooBig = true
+				}
+				if !f.tooBig {
+					f.body = append(f.body, c)
+				}
 				continue
 			}
 			// Not part of a clear sequence: drop what was
@@ -118,6 +134,11 @@ func (f *clearFilter) Filter(in []byte, clear func([]byte)) []byte {
 }
 
 func (f *clearFilter) finish(clear func([]byte)) {
+	if f.tooBig {
+		log.Warnf("clear sequence: more than %d bytes of base64, dropped", clearBodyLimit)
+		f.reset()
+		return
+	}
 	data, err := base64.StdEncoding.DecodeString(string(f.body))
 	f.reset()
 	if err != nil {
@@ -130,6 +151,7 @@ func (f *clearFilter) finish(clear func([]byte)) {
 func (f *clearFilter) reset() {
 	f.inBody = false
 	f.sawESC = false
+	f.tooBig = false
 	f.body = f.body[:0]
 }
 

@@ -153,3 +153,44 @@ func TestShellClearScreenAlt(t *testing.T) {
 		t.Errorf("sent to client %q, want nothing", got)
 	}
 }
+
+// TestClearFilterLimit checks that a clear sequence holding more base64 than
+// clearBodyLimit is dropped without being kept, that one at the limit is
+// not, and that input after either is passed on.
+func TestClearFilterLimit(t *testing.T) {
+	defer func(n int) { clearBodyLimit = n }(clearBodyLimit)
+	clearBodyLimit = 8
+
+	atLimit := "abcdef"   // 8 bytes of base64
+	tooBig := "abcdefghi" // 12
+	out, screens := filterAll("1" + clearSeq(atLimit, "\a") + "2" + clearSeq(tooBig, "\033\\") + "3" + clearSeq("ok", "\a") + "4")
+	if out != "1234" {
+		t.Errorf("passed through %q, want \"1234\"", out)
+	}
+	if len(screens) != 2 || screens[0] != atLimit || screens[1] != "ok" {
+		t.Errorf("screens = %q, want [%q \"ok\"]", screens, atLimit)
+	}
+
+	// A sequence that is never ended: what is kept stays bounded, and
+	// the first byte that cannot be part of it ends it.
+	var f clearFilter
+	none := func([]byte) { t.Error("an unterminated sequence was reported") }
+	out = string(f.Filter([]byte("x"+clearIntro), none))
+	chunk := bytes.Repeat([]byte{'A'}, 1000)
+	for i := 0; i < 100; i++ {
+		out += string(f.Filter(chunk, none))
+		if cap(f.body) > 2*clearBodyLimit+64 {
+			t.Fatalf("after %d bytes the filter holds %d", (i+1)*len(chunk), cap(f.body))
+		}
+	}
+	out += string(f.Filter([]byte("\rls\r"), none))
+	if out != "x\rls\r" {
+		t.Errorf("passed through %q, want \"x\\rls\\r\"", out)
+	}
+	// And the filter works again afterwards.
+	out, screens = "", nil
+	got := f.Filter([]byte(clearSeq("again", "\a")), func(b []byte) { screens = append(screens, string(b)) })
+	if len(got) != 0 || len(screens) != 1 || screens[0] != "again" {
+		t.Errorf("after an oversize sequence: passed %q, screens %q", got, screens)
+	}
+}

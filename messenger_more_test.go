@@ -16,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"io/ioutil"
 	"testing"
@@ -226,5 +227,82 @@ func TestMessageKindString(t *testing.T) {
 	}
 	if messageKind(999).String() != "message-999" {
 		t.Errorf("unknown kind = %q", messageKind(999).String())
+	}
+}
+
+// header returns the 6 byte header of a message of kind carrying count bytes.
+func header(kind messageKind, count uint32) []byte {
+	return []byte{0, byte(kind), byte(count >> 24), byte(count >> 16), byte(count >> 8), byte(count)}
+}
+
+// TestMessengerReaderTooBig checks that a message claiming more than
+// maxMessage bytes ends the stream with errMessageTooBig, at once and
+// without making room for it, and that the stream stays ended.
+func TestMessengerReaderTooBig(t *testing.T) {
+	for _, count := range []uint32{maxMessage + 1, 1 << 31, 0xffffffff} {
+		called := false
+		in := append([]byte("ab"), header(clearMessage, count)...)
+		in = append(in, "this is not a message"...)
+		r := NewMessengerReader(bytes.NewReader(in), func(messageKind, []byte) { called = true })
+		size := cap(r.message)
+
+		var buf [64]byte
+		n, err := r.Read(buf[:])
+		if string(buf[:n]) != "ab" || err != nil {
+			t.Fatalf("count %d: first read = %q, %v; want \"ab\", nil", count, buf[:n], err)
+		}
+		for i := 0; i < 3; i++ {
+			n, err = r.Read(buf[:])
+			if n != 0 || !errors.Is(err, errMessageTooBig) {
+				t.Errorf("count %d: read %d = %q, %v; want errMessageTooBig", count, i, buf[:n], err)
+			}
+		}
+		if called {
+			t.Errorf("count %d: the callback was called", count)
+		}
+		if cap(r.message) != size {
+			t.Errorf("count %d: buffer grew from %d to %d", count, size, cap(r.message))
+		}
+	}
+}
+
+// TestMessengerLimit checks that a message of exactly maxMessage bytes is
+// sent and received, and that one a byte longer is refused by Send with
+// nothing written.
+func TestMessengerLimit(t *testing.T) {
+	var wire bytes.Buffer
+	w := NewMessengerWriter(&wire)
+	msg := bytes.Repeat([]byte{'x'}, maxMessage+1)
+
+	if n, err := w.Send(clearMessage, msg); n != 0 || !errors.Is(err, errMessageTooBig) {
+		t.Errorf("Send of %d bytes = %d, %v; want 0, errMessageTooBig", len(msg), n, err)
+	}
+	if wire.Len() != 0 {
+		t.Fatalf("Send of a message that is too big wrote %d bytes", wire.Len())
+	}
+
+	msg = msg[:maxMessage]
+	if n, err := w.Send(clearMessage, msg); n != len(msg) || err != nil {
+		t.Fatalf("Send of %d bytes = %d, %v", len(msg), n, err)
+	}
+	var got []byte
+	r := NewMessengerReader(&wire, func(kind messageKind, data []byte) {
+		if kind != clearMessage {
+			t.Errorf("got kind %v", kind)
+		}
+		got = append([]byte{}, data...)
+	})
+	var buf [64]byte
+	if n, err := r.Read(buf[:]); n != 0 || err != io.EOF {
+		t.Errorf("Read = %d, %v; want 0, EOF", n, err)
+	}
+	if !bytes.Equal(got, msg) {
+		t.Errorf("received %d bytes, want the %d sent", len(got), len(msg))
+	}
+
+	// Terminal data is not a message and has no limit.
+	wire.Reset()
+	if n, err := w.Write(append(msg, 'y')); n != maxMessage+1 || err != nil {
+		t.Errorf("Write of %d bytes = %d, %v", maxMessage+1, n, err)
 	}
 }

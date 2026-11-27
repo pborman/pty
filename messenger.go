@@ -16,12 +16,29 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/pborman/pty/log"
 	"github.com/pborman/pty/mutex"
 )
+
+// maxMessage is the most bytes a message may carry.  Nothing sent comes
+// near it: the largest message is a clearMessage, which holds a screenful of
+// terminal output.
+//
+// The length of a message is 4 bytes on the wire, so without a limit a
+// stream that has lost its place, or a broken peer, could have the reader
+// wait for, and make room for, 4 GiB.  There is nothing in the stream to
+// find the next message by, so a reader that sees a longer message gives up
+// on the connection: Read returns an error wrapping errMessageTooBig, then
+// and from then on.  Send refuses a longer message, so that the sender finds
+// out rather than having its connection dropped.
+const maxMessage = 1 << 20
+
+// errMessageTooBig is the error for a message of more than maxMessage bytes.
+var errMessageTooBig = errors.New("message too big")
 
 type MessengerWriter struct {
 	mu *mutex.Mutex
@@ -83,6 +100,11 @@ func (m *MessengerWriter) Sendf(kind messageKind, format string, v ...interface{
 func (m *MessengerWriter) Send(kind messageKind, buf []byte) (int, error) {
 	if kind == 0 {
 		return m.Write(buf)
+	}
+	if len(buf) > maxMessage {
+		err := fmt.Errorf("%w: %v of %d bytes not sent, the limit is %d", errMessageTooBig, kind, len(buf), maxMessage)
+		log.Warnf("%v", err)
+		return 0, err
 	}
 	defer m.mu.Lock("Send")()
 	return m.send(kind, buf)
@@ -213,7 +235,6 @@ func (m *MessengerReader) Read(buf []byte) (cnt int, err error) {
 		}
 
 		// We now have a message.
-		log.Errorf("Filling 6 bytes")
 		if !m.fill(6) {
 			return cnt, m.error
 		}
@@ -225,7 +246,16 @@ func (m *MessengerReader) Read(buf []byte) (cnt int, err error) {
 
 		m.mh += 6 // skip past NUL, kind, and count
 
-		log.Errorf("Filling %d bytes", count)
+		// count is negative if int is 32 bits and the top bit is set.
+		if count < 0 || count > maxMessage {
+			// We cannot tell where the next message starts, so
+			// nothing more can be read: drop what is buffered,
+			// which makes fill report this error from now on.
+			m.mh, m.mt = 0, 0
+			m.error = fmt.Errorf("%w: %v of %d bytes received, the limit is %d", errMessageTooBig, kind, uint32(count), maxMessage)
+			log.Warnf("%v", m.error)
+			return 0, m.error
+		}
 		if !m.fill(count) {
 			return 0, m.error
 		}
