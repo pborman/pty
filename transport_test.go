@@ -421,3 +421,75 @@ func TestListenRemovesStaleSecret(t *testing.T) {
 		t.Errorf("stale secret left in a unix session: %v", err)
 	}
 }
+
+// TestDialWaitsForNewServer checks how a client waits for a server it has
+// just started: with the dead server's address withdrawn, Dial waits for the
+// new server to publish its own and connects to it, however long the server
+// takes to start, rather than dialing the old address.
+func TestDialWaitsForNewServer(t *testing.T) {
+	withShortHome(t)
+	s := MakeSession("restart", "")
+	defer s.Remove()
+	deadServer(t, s)
+
+	// Left alone, the old address is found and the dial fails.
+	if c, err := MakeSession(s.Name, "").Dial(); err == nil {
+		c.Close()
+		t.Fatal("Dial of a dead server's address succeeded")
+	}
+
+	s.withdrawAddr()
+	if addr := s.Addr(); addr != "" {
+		t.Fatalf("after withdrawAddr, addr = %q", addr)
+	}
+	const startup = 300 * time.Millisecond
+	lnc := make(chan net.Listener, 1)
+	go func() {
+		time.Sleep(startup)
+		ln, err := s.Listen()
+		if err != nil {
+			t.Error(err)
+		}
+		lnc <- ln
+	}()
+	start := time.Now()
+	c, err := MakeSession(s.Name, "").Dial()
+	took := time.Since(start)
+	ln := <-lnc
+	if ln != nil {
+		defer ln.Close()
+	}
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	c.Close()
+	// Take that connection off the listener so roundTrip gets its own.
+	if sc, err := ln.Accept(); err != nil {
+		t.Fatal(err)
+	} else {
+		sc.Close()
+	}
+	if took < startup || took > startup+2*time.Second {
+		t.Errorf("Dial took %v with a server that took %v to start", took, startup)
+	}
+	roundTrip(t, s, ln)
+}
+
+// TestDialNoServer checks that Dial gives up after dialWait when no server
+// publishes an address.
+func TestDialNoServer(t *testing.T) {
+	defer withTempHome(t)()
+	defer func(d time.Duration) { dialWait = d }(dialWait)
+	dialWait = 100 * time.Millisecond
+	s := MakeSession("nobody", "")
+	defer s.Remove()
+	start := time.Now()
+	c, err := s.Dial()
+	if err == nil {
+		c.Close()
+		t.Fatal("Dial with no server succeeded")
+	}
+	if took := time.Since(start); took < dialWait || took > dialWait+2*time.Second {
+		t.Errorf("Dial gave up after %v, want about %v", took, dialWait)
+	}
+}

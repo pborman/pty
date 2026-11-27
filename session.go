@@ -222,6 +222,26 @@ func (s *Session) Check() bool {
 	return false
 }
 
+// withdrawAddr removes the session's published address.  It is called before
+// a server is started for the session: the addr file may be left from a
+// server that is gone, and with it out of the way the next address to appear
+// is the new server's.
+func (s *Session) withdrawAddr() {
+	os.Remove(filepath.Join(s.path, "addr"))
+}
+
+// dialWait is how long Dial waits for a server to publish its address, and
+// dialPoll how often it looks.
+var (
+	dialWait = 5 * time.Second
+	dialPoll = 10 * time.Millisecond
+)
+
+// Dial connects to the session's server.  If the session has no published
+// address it waits up to dialWait for one, which is how a client that has
+// just started a server waits for it: a server publishes its address only
+// once it is accepting connections (see Listen), so there is nothing to
+// guess about how long it takes to start.
 func (s *Session) Dial() (net.Conn, error) {
 	start := time.Now()
 	var network, addr string
@@ -229,10 +249,10 @@ func (s *Session) Dial() (net.Conn, error) {
 		if network, addr = s.netAddr(); addr != "" {
 			break
 		}
-		if time.Now().Sub(start) > time.Second*5 {
+		if time.Now().Sub(start) > dialWait {
 			return nil, fmt.Errorf("session %s not found", s.Name)
 		}
-		time.Sleep(time.Second / 10)
+		time.Sleep(dialPoll)
 	}
 	log.Infof("Dialing %s @ %s %s", s.Name, network, addr)
 	c, err := net.Dial(network, addr)

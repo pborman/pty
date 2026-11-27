@@ -229,12 +229,13 @@ func main() {
 			debugFile = session.DebugPath()
 		}
 
+		// Spawn withdraws the address of the server that is gone, so
+		// Dial below waits for the new server to publish its own,
+		// which it does once it is accepting connections.
 		session.Spawn(debugFile, opts.Debug)
 		if opts.Detach {
 			return
 		}
-		// Give the new shell a chance to start up.
-		time.Sleep(time.Second / 2)
 	}
 
 	// Here on down is the pty client.

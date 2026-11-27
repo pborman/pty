@@ -272,6 +272,7 @@ func (s *Session) Spawn(debugFile string, foreground bool) {
 	if s.Check() {
 		s.Exitf("Session %q already exists", s.Name)
 	}
+	s.withdrawAddr()
 	if foreground {
 		s.run(debugFile)
 		return
