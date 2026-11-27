@@ -1,5 +1,7 @@
 # Notes for working on pty
 
+Open work is listed in `Tasks.md`.
+
 ## Client and server are different builds
 
 pty is one binary, but a session's server runs for weeks while clients come
